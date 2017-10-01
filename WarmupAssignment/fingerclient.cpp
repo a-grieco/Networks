@@ -16,7 +16,7 @@
 #include <limits>
 
 #define PORT_NUMBER "10042"
-#define MAXDATASIZE 100
+#define MAXDATASIZE 10000   // max size of fingerservice response from server
 
 /* Checks for valid argument format (username@hostname:server_port): so the '@'
  * and ':' symbols are present in the expected order and each item (username,
@@ -40,7 +40,6 @@ int main(int argc, char *argv[]) {
   std::size_t at_pos, colon_pos;
   at_pos = user_arg.find("@");
   colon_pos = user_arg.find(":");
-  // printf("at_pos: %d, colon_pos: %d\n", at_pos, colon_pos); DELETE
 
   if(arg_format_is_valid(at_pos, colon_pos, user_arg)) {
     username = user_arg.substr(0, at_pos);
@@ -51,15 +50,13 @@ int main(int argc, char *argv[]) {
     fprintf(stderr, "usage %s username@hostname:server_port\n", argv[0]);
     exit(0);
   }
-  printf("username: %s\nhostname: %s\nserver_port: %s\n",
-    username.c_str(), hostname.c_str(), server_port.c_str());
 
   int sockfd;
   struct addrinfo hints, *servinfo, *p;
   int rv;
 
   int numbytes;
-  char buf[100];
+  char fingerserv_buf[MAXDATASIZE];
 
   memset(&hints, 0, sizeof hints);
   hints.ai_family = AF_UNSPEC;  // use AF_INET6 to force IPv6
@@ -96,6 +93,13 @@ int main(int argc, char *argv[]) {
   if(send(sockfd, username.c_str(), 13, 0) == -1) {
     perror("send");
   }
+
+  if((numbytes = recv(sockfd, fingerserv_buf, MAXDATASIZE-1, 0)) == -1) {
+    perror("recv");
+    exit(1);
+  }
+  fingerserv_buf[numbytes] = '\0';
+  printf("%s\n", fingerserv_buf);
 
   // close the connection with the server
   close(sockfd);

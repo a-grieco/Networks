@@ -15,9 +15,6 @@
 #include <iostream>
 #include <unistd.h>
 
-// const int CONNECTIONS_ALLOWED = 5;  // usually 20
-// const char* PORT_NUMBER = "10042";
-
 #define PORT_NUMBER "10042"
 #define MAXDATASIZE 100   // max size of client's username
 #define CONNECTIONS_ALLOWED 10
@@ -97,11 +94,11 @@ int main(int argc, char * argv[]) {
       username_buf[numbytes] = '\0';
       printf("Message from client: '%s'\n", username_buf);
 
-      // if((dup2(new_sockfd, 1))!= 1 || (dup2(new_sockfd, 2)) != 2) {
-      //   perror("dup2");
-      // }
-      // dup2(new_sockfd, 1);
-      // dup2(new_sockfd, 2);
+      if((dup2(new_sockfd, 1))!= 1 || (dup2(new_sockfd, 2)) != 2) {
+        perror("dup2");
+      }
+      dup2(new_sockfd, 1);
+      dup2(new_sockfd, 2);
 
       if((execl("/usr/bin/finger", "finger", username_buf, NULL)) == -1) {
         perror("execl");
