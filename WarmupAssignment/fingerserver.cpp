@@ -19,6 +19,7 @@
 // const char* PORT_NUMBER = "10042";
 
 #define PORT_NUMBER "10042"
+#define MAXDATASIZE 100   // max size of client's username
 #define CONNECTIONS_ALLOWED 10
 
 int main(int argc, char * argv[]) {
@@ -29,6 +30,9 @@ int main(int argc, char * argv[]) {
   socklen_t addr_size;
   int rv;
   pid_t cp_id;  // child process id
+
+  int numbytes;
+  char username_buf[MAXDATASIZE];
 
   memset(&hints, 0, sizeof hints);
   hints.ai_family = AF_UNSPEC;  // use AF_INET6 to force IPv6
@@ -77,10 +81,6 @@ int main(int argc, char * argv[]) {
       continue;
     }
 
-    // TODO: replace with method to retrieve user addr as username@
-    // inet_ntop(client_addr.ss_family,
-    //   get_in_addr((struct sockaddr *)&client_addr), s, sizeof s);
-
     cp_id = fork();
     if(cp_id == -1) {
       perror("fork");
@@ -90,16 +90,20 @@ int main(int argc, char * argv[]) {
     if(cp_id == 0) {  // child process executing
       close(sockfd);  // child shouldn't have a listener
 
-      if(send(new_sockfd, "Hello, world!", 13, 0) == -1) {
-        perror("send");
+      if((numbytes = recv(new_sockfd, username_buf, MAXDATASIZE-1, 0)) == -1) {
+        perror("recv");
+        exit(1);
       }
+      username_buf[numbytes] = '\0';
+      printf("Message from client: '%s'\n", username_buf);
+
       // if((dup2(new_sockfd, 1))!= 1 || (dup2(new_sockfd, 2)) != 2) {
       //   perror("dup2");
       // }
       // dup2(new_sockfd, 1);
       // dup2(new_sockfd, 2);
 
-      if((execl("/usr/bin/finger", "finger", "griecoa1", NULL)) == -1) {
+      if((execl("/usr/bin/finger", "finger", username_buf, NULL)) == -1) {
         perror("execl");
       };
 
@@ -110,7 +114,6 @@ int main(int argc, char * argv[]) {
       close(new_sockfd);  // parent shouldn't keep child sockets
     }
   }
-
 
   return 0;
 }

@@ -37,11 +37,10 @@ int main(int argc, char *argv[]) {
   // parse user argument
   std::string user_arg = std::string(argv[1]);
   std::string username, hostname, server_port;
-  printf("user_arg: %s\n", user_arg.c_str());
   std::size_t at_pos, colon_pos;
   at_pos = user_arg.find("@");
   colon_pos = user_arg.find(":");
-  printf("at_pos: %d, colon_pos: %d\n", at_pos, colon_pos);
+  // printf("at_pos: %d, colon_pos: %d\n", at_pos, colon_pos); DELETE
 
   if(arg_format_is_valid(at_pos, colon_pos, user_arg)) {
     username = user_arg.substr(0, at_pos);
@@ -66,8 +65,8 @@ int main(int argc, char *argv[]) {
   hints.ai_family = AF_UNSPEC;  // use AF_INET6 to force IPv6
   hints.ai_socktype = SOCK_STREAM;
 
-  // if((rv = getaddrinfo("cs1.seattleu.edu", PORT_NUMBER, &hints, &servinfo)) != 0) {
-  if((rv = getaddrinfo(hostname.c_str(), server_port.c_str(), &hints, &servinfo)) != 0) {
+  if((rv = getaddrinfo(hostname.c_str(), server_port.c_str(), &hints,
+      &servinfo)) != 0) {
     fprintf(stderr, "getaddrinfo: %s\n", gai_strerror(rv));
     exit(1);
   }
@@ -94,14 +93,9 @@ int main(int argc, char *argv[]) {
     exit(2);
   }
 
-  if((numbytes = recv(sockfd, buf, MAXDATASIZE-1, 0)) == -1) {
-    perror("recv");
-    exit(1);
+  if(send(sockfd, username.c_str(), 13, 0) == -1) {
+    perror("send");
   }
-
-  buf[numbytes] = '\0';
-
-  printf("Message from server: '%s'\n", buf);
 
   // close the connection with the server
   close(sockfd);
