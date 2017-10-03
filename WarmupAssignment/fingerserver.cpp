@@ -11,25 +11,81 @@
 #include <sys/socket.h>
 #include <netinet/in.h>
 #include <netdb.h>
-#include <pthread.h>
 #include <iostream>
-#include <unistd.h>
 
 #define PORT_NUMBER "10042"
 #define MAXDATASIZE 100         // max size of client's username
 #define CONNECTIONS_ALLOWED 10  // max number of clients serviceable
 
+void create_and_bind_to_socket(int& sockfd);
+
 int main(int argc, char * argv[]) {
 
   int sockfd, new_sockfd;
-  struct addrinfo hints, *servinfo, *p;
   struct sockaddr_storage client_addr;
   socklen_t addr_size;
-  int rv;
   pid_t cp_id;  // child process id
+
+  create_and_bind_to_socket(sockfd);
 
   int numbytes;
   char username_buf[MAXDATASIZE];
+
+  // listen for incomming client connections
+  if(listen(sockfd, CONNECTIONS_ALLOWED) == -1) {
+    perror("listen");
+    exit(1);
+  };
+
+  // accept incomming connections
+  while(true) {
+    addr_size = sizeof client_addr;
+    new_sockfd = accept(sockfd, (struct sockaddr *)&client_addr, &addr_size);
+    if(new_sockfd == -1) {
+      perror("accept");
+      continue;
+    }
+
+    cp_id = fork();
+    if(cp_id == -1) { // error creating child process
+      perror("fork");
+      exit(1);
+    }
+
+    if(cp_id == 0) {  // child process executing
+      close(sockfd);  // child shouldn't have a listener
+
+      if((numbytes = recv(new_sockfd, username_buf, MAXDATASIZE-1, 0)) == -1) {
+        perror("recv");
+        exit(1);
+      }
+      username_buf[numbytes] = '\0';
+      printf("Username received from client: '%s'\n", username_buf);
+
+      if((dup2(new_sockfd, 1))!= 1 || (dup2(new_sockfd, 2)) != 2) {
+        perror("dup2");
+      }
+
+      if((execl("/usr/bin/finger", "finger", username_buf, NULL)) == -1) {
+        perror("execl");
+      };
+
+      close(new_sockfd);
+      exit(0);
+    }
+    else {  // parent process executing
+      close(new_sockfd);  // parent shouldn't keep child sockets
+    }
+  }
+
+  return 0;
+}
+
+/* Create a socket and bind to it based on the defined port number or print
+ * error and exit on failure. */
+void create_and_bind_to_socket(int& sockfd) {
+  struct addrinfo hints, *servinfo, *p;
+  int rv;
 
   memset(&hints, 0, sizeof hints);
   hints.ai_family = AF_UNSPEC;  // use AF_INET6 to force IPv6
@@ -63,54 +119,4 @@ int main(int argc, char * argv[]) {
     fprintf(stderr, "failed to bind socket\n");
     exit(1);
   }
-
-  if(listen(sockfd, CONNECTIONS_ALLOWED) == -1) {
-    perror("listen");
-    exit(1);
-  };
-
-  // accept incomming connections
-  while(true) {
-    addr_size = sizeof client_addr;
-    new_sockfd = accept(sockfd, (struct sockaddr *)&client_addr, &addr_size);
-    if(new_sockfd == -1) {
-      perror("accept");
-      continue;
-    }
-
-    cp_id = fork();
-    if(cp_id == -1) {
-      perror("fork");
-      exit(1);
-    }
-
-    if(cp_id == 0) {  // child process executing
-      close(sockfd);  // child shouldn't have a listener
-
-      if((numbytes = recv(new_sockfd, username_buf, MAXDATASIZE-1, 0)) == -1) {
-        perror("recv");
-        exit(1);
-      }
-      username_buf[numbytes] = '\0';
-      printf("Message from client: '%s'\n", username_buf);
-
-      if((dup2(new_sockfd, 1))!= 1 || (dup2(new_sockfd, 2)) != 2) {
-        perror("dup2");
-      }
-      dup2(new_sockfd, 1);
-      dup2(new_sockfd, 2);
-
-      if((execl("/usr/bin/finger", "finger", username_buf, NULL)) == -1) {
-        perror("execl");
-      };
-
-      close(new_sockfd);
-      exit(0);
-    }
-    else {  // parent process executing
-      close(new_sockfd);  // parent shouldn't keep child sockets
-    }
-  }
-
-  return 0;
 }
