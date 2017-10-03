@@ -15,18 +15,10 @@
 #include <iostream>
 #include <limits>
 
-#define PORT_NUMBER "10042"
-#define MAXDATASIZE 10000   // max size of fingerservice response from server
+#define BUFFERSIZE 10 // for reading response from server
 
-/* Checks for valid argument format (username@hostname:server_port): so the '@'
- * and ':' symbols are present in the expected order and each item (username,
- * hostname,and server_port) are at least 1 character in length */
 bool arg_format_is_valid(std::size_t at_pos, std::size_t colon_pos,
-  std::string user_arg) {
-    return (at_pos != std::string::npos && colon_pos != std::string::npos &&
-        at_pos > 0 && colon_pos > (at_pos + 1) &&
-        user_arg.length() > (colon_pos + 1));
-}
+  std::string user_arg);
 
 int main(int argc, char *argv[]) {
 
@@ -34,13 +26,13 @@ int main(int argc, char *argv[]) {
     fprintf(stderr, "usage %s username@hostname:server_port\n", argv[0]);
     exit(0);
   }
+
   // parse user argument
   std::string user_arg = std::string(argv[1]);
   std::string username, hostname, server_port;
   std::size_t at_pos, colon_pos;
   at_pos = user_arg.find("@");
   colon_pos = user_arg.find(":");
-
   if(arg_format_is_valid(at_pos, colon_pos, user_arg)) {
     username = user_arg.substr(0, at_pos);
     hostname = user_arg.substr(at_pos + 1, colon_pos - (at_pos + 1));
@@ -56,7 +48,7 @@ int main(int argc, char *argv[]) {
   int rv;
 
   int numbytes;
-  char fingerserv_buf[MAXDATASIZE];
+  char mssg_buf[BUFFERSIZE];
 
   memset(&hints, 0, sizeof hints);
   hints.ai_family = AF_UNSPEC;  // use AF_INET6 to force IPv6
@@ -94,15 +86,35 @@ int main(int argc, char *argv[]) {
     perror("send");
   }
 
-  if((numbytes = recv(sockfd, fingerserv_buf, MAXDATASIZE-1, 0)) == -1) {
-    perror("recv");
-    exit(1);
+  // read and print message from socket until complete
+  bool message_completed = false;
+  while(!message_completed) {
+    if((numbytes = recv(sockfd, mssg_buf, BUFFERSIZE-1, 0)) == -1) {
+      perror("recv");
+      exit(1);
+    }
+    if(numbytes == 0) {
+      message_completed = true;
+      printf("\n");
+    }
+    else {
+      mssg_buf[numbytes] = '\0';
+      printf("%s", mssg_buf);
+    }
   }
-  fingerserv_buf[numbytes] = '\0';
-  printf("%s\n", fingerserv_buf);
 
   // close the connection with the server
   close(sockfd);
 
   return 0;
+}
+
+/* Checks for valid argument format (username@hostname:server_port): so the '@'
+ * and ':' symbols are present in the expected order and each item (username,
+ * hostname,and server_port) are at least 1 character in length */
+bool arg_format_is_valid(std::size_t at_pos, std::size_t colon_pos,
+  std::string user_arg) {
+    return (at_pos != std::string::npos && colon_pos != std::string::npos &&
+        at_pos > 0 && colon_pos > (at_pos + 1) &&
+        user_arg.length() > (colon_pos + 1));
 }

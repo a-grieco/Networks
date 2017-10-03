@@ -16,8 +16,8 @@
 #include <unistd.h>
 
 #define PORT_NUMBER "10042"
-#define MAXDATASIZE 100   // max size of client's username
-#define CONNECTIONS_ALLOWED 10
+#define MAXDATASIZE 100         // max size of client's username
+#define CONNECTIONS_ALLOWED 10  // max number of clients serviceable
 
 int main(int argc, char * argv[]) {
 
