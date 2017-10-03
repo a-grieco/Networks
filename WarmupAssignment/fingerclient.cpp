@@ -31,7 +31,7 @@ int main(int argc, char *argv[]) {
   if(argc < 2 || parse_user_arg(username, hostname, server_port,
       std::string(argv[1])) == false) {
     fprintf(stderr, "usage %s username@hostname:server_port\n", argv[0]);
-    exit(0);
+    exit(EXIT_FAILURE);
   }
 
   int sockfd;
@@ -92,7 +92,7 @@ void connect_to_server(std::string hostname, std::string server_port,
   if((rv = getaddrinfo(hostname.c_str(), server_port.c_str(), &hints,
       &servinfo)) != 0) {
     fprintf(stderr, "getaddrinfo: %s\n", gai_strerror(rv));
-    exit(1);
+    exit(EXIT_FAILURE);
   }
 
   // loop through all the results and connect to the first one possible
@@ -113,7 +113,7 @@ void connect_to_server(std::string hostname, std::string server_port,
 
   if(p == NULL) {   // p reached NULL with no connection
     fprintf(stderr, "failed to connect\n");
-    exit(2);
+    exit(EXIT_FAILURE);
   }
 }
 
@@ -125,7 +125,7 @@ void print_message_from_server(int sockfd) {
   while(!message_completed) {
     if((numbytes = recv(sockfd, mssg_buf, BUFFERSIZE-1, 0)) == -1) {
       perror("recv");
-      exit(1);
+      exit(EXIT_FAILURE);
     }
     if(numbytes == 0) {
       message_completed = true;

@@ -34,7 +34,7 @@ int main(int argc, char * argv[]) {
   // listen for incomming client connections
   if(listen(sockfd, CONNECTIONS_ALLOWED) == -1) {
     perror("listen");
-    exit(1);
+    exit(EXIT_FAILURE);
   };
 
   // accept incomming connections
@@ -49,7 +49,7 @@ int main(int argc, char * argv[]) {
     cp_id = fork();
     if(cp_id == -1) { // error creating child process
       perror("fork");
-      exit(1);
+      exit(EXIT_FAILURE);
     }
 
     if(cp_id == 0) {  // child process executing
@@ -57,7 +57,7 @@ int main(int argc, char * argv[]) {
 
       if((numbytes = recv(new_sockfd, username_buf, MAXDATASIZE-1, 0)) == -1) {
         perror("recv");
-        exit(1);
+        exit(EXIT_FAILURE);
       }
       username_buf[numbytes] = '\0';
       printf("Username received from client: '%s'\n", username_buf);
@@ -71,7 +71,7 @@ int main(int argc, char * argv[]) {
       };
 
       close(new_sockfd);
-      exit(0);
+      exit(EXIT_SUCCESS);
     }
     else {  // parent process executing
       close(new_sockfd);  // parent shouldn't keep child sockets
@@ -95,7 +95,7 @@ void create_and_bind_to_socket(int& sockfd) {
 
   if((rv = getaddrinfo(NULL, PORT_NUMBER, &hints, &servinfo)) != 0) {
     fprintf(stderr, "getaddrinfo: %s\n", gai_strerror(rv));
-    exit(1);
+    exit(EXIT_FAILURE);
   }
 
   // loop through all the results and connect to the first one possible
@@ -117,6 +117,6 @@ void create_and_bind_to_socket(int& sockfd) {
   // if p reached NULL with no bind, print error and exit
   if(p == NULL) {
     fprintf(stderr, "failed to bind socket\n");
-    exit(1);
+    exit(EXIT_FAILURE);
   }
 }
