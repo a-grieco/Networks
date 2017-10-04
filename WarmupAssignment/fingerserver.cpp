@@ -1,6 +1,6 @@
-/* fingerserver using TCP connection for multiple client connections
-* IP Address: cs1.seattleu.edu, Port Number: 10042 */
-// 5th on roster: using Port# 10040-10049
+/* fingerserver using TCP connection for multiple fingerclient connections
+* IP Address: cs1.seattleu.edu, Port Number: 10042
+* (5th on roster: using Port Numbers 10040-10049) */
 // TODO: test on cs2.seattleu.edu
 
 #include <stdio.h>
@@ -12,12 +12,16 @@
 #include <netinet/in.h>
 #include <netdb.h>
 #include <iostream>
+#include <signal.h>
 
 #define PORT_NUMBER "10042"
 #define MAXDATASIZE 100         // max size of client's username
 #define CONNECTIONS_ALLOWED 10  // max number of clients serviceable
 
+bool display_status = true;
+
 void create_and_bind_to_socket(int& sockfd);
+void clean_exit(int flag);
 
 int main(int argc, char * argv[]) {
 
@@ -26,16 +30,20 @@ int main(int argc, char * argv[]) {
   socklen_t addr_size;
   pid_t cp_id;  // child process id
 
-  create_and_bind_to_socket(sockfd);
-
   int numbytes;
   char username_buf[MAXDATASIZE];
+
+  create_and_bind_to_socket(sockfd);
 
   // listen for incomming client connections
   if(listen(sockfd, CONNECTIONS_ALLOWED) == -1) {
     perror("listen");
     exit(EXIT_FAILURE);
   };
+
+  if(display_status) {
+    printf("Server listening for connections...\n");
+  }
 
   // accept incomming connections
   while(true) {
@@ -60,23 +68,31 @@ int main(int argc, char * argv[]) {
         exit(EXIT_FAILURE);
       }
       username_buf[numbytes] = '\0';
-      printf("Username received from client: '%s'\n", username_buf);
+
+      if(display_status) {
+        printf("\tUsername received: '%s'\n", username_buf);
+      }
 
       if((dup2(new_sockfd, 1))!= 1 || (dup2(new_sockfd, 2)) != 2) {
         perror("dup2");
       }
 
+      close(new_sockfd);
+
       if((execl("/usr/bin/finger", "finger", username_buf, NULL)) == -1) {
         perror("execl");
       };
 
-      close(new_sockfd);
-      exit(EXIT_SUCCESS);
+      exit(EXIT_FAILURE); // code should not reach this point using execl()
+                          // in other cases, reaching here indicates success
     }
     else {  // parent process executing
       close(new_sockfd);  // parent shouldn't keep child sockets
     }
   }
+
+  signal(SIGTERM, clean_exit);
+  signal(SIGINT, clean_exit);
 
   return 0;
 }
@@ -119,4 +135,9 @@ void create_and_bind_to_socket(int& sockfd) {
     fprintf(stderr, "failed to bind socket\n");
     exit(EXIT_FAILURE);
   }
+}
+
+/* Helps to ensure port is freed upoon a "rough" exit from a program */
+void clean_exit(int flag) {
+  exit(EXIT_SUCCESS);
 }

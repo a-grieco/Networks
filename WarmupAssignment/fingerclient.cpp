@@ -1,6 +1,6 @@
-/* fingerclient using TCP connection to connect to server
- * IP Address: cs1.seattleu.edu, Port Number: 10042 */
-// 5th on roster: using Port#s 10040-10049
+/* fingerclient using TCP connection to connect to fingerserver
+ * IP Address: cs1.seattleu.edu, Port Number: 10042
+ * (5th on roster: using Port Numbers 10040-10049) */
 // TODO: test on cs2.seattleu.edu
 
 #include <stdio.h>
@@ -14,7 +14,7 @@
 #include <netdb.h>
 #include <iostream>
 
-#define BUFFERSIZE 10   // for reading response from server
+#define BUFFERSIZE 1000   // for reading response from server
 
 bool parse_user_arg(std::string& username, std::string& hostname,
   std::string& server_port, std::string user_arg);
