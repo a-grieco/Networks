@@ -21,6 +21,7 @@
 bool display_status = true;
 
 void create_and_bind_to_socket(int& sockfd);
+void send_response_to_client(int new_sockfd);
 void clean_exit(int flag);
 
 int main(int argc, char * argv[]) {
@@ -28,10 +29,7 @@ int main(int argc, char * argv[]) {
   int sockfd, new_sockfd;
   struct sockaddr_storage client_addr;
   socklen_t addr_size;
-  pid_t cp_id;  // child process id
-
-  int numbytes;
-  char username_buf[MAXDATASIZE];
+  pid_t pid;  // child process id
 
   create_and_bind_to_socket(sockfd);
 
@@ -54,39 +52,17 @@ int main(int argc, char * argv[]) {
       continue;
     }
 
-    cp_id = fork();
-    if(cp_id == -1) { // error creating child process
+    switch(pid = fork()) {
+    // error creating child process
+    case -1:
       perror("fork");
-      exit(EXIT_FAILURE);
-    }
-
-    if(cp_id == 0) {  // child process executing
+      exit(EXIT_FAILURE); // parent exits
+    // child process executing
+    case 0 :
       close(sockfd);  // child shouldn't have a listener
-
-      if((numbytes = recv(new_sockfd, username_buf, MAXDATASIZE-1, 0)) == -1) {
-        perror("recv");
-        exit(EXIT_FAILURE);
-      }
-      username_buf[numbytes] = '\0';
-
-      if(display_status) {
-        printf("\tUsername received: '%s'\n", username_buf);
-      }
-
-      if((dup2(new_sockfd, 1))!= 1 || (dup2(new_sockfd, 2)) != 2) {
-        perror("dup2");
-      }
-
-      close(new_sockfd);
-
-      if((execl("/usr/bin/finger", "finger", username_buf, NULL)) == -1) {
-        perror("execl");
-      };
-
-      exit(EXIT_FAILURE); // code should not reach this point using execl()
-                          // in other cases, reaching here indicates success
-    }
-    else {  // parent process executing
+      send_response_to_client(new_sockfd);
+    // parent process executing
+    default:
       close(new_sockfd);  // parent shouldn't keep child sockets
     }
   }
@@ -140,4 +116,33 @@ void create_and_bind_to_socket(int& sockfd) {
 /* Helps to ensure port is freed upoon a "rough" exit from a program */
 void clean_exit(int flag) {
   exit(EXIT_SUCCESS);
+}
+
+/* Executes child process of sending finger service data to fingerclient;
+ * ensures child socket is closed upon completion. */
+void send_response_to_client(int new_sockfd) {
+  int numbytes;
+  char username_buf[MAXDATASIZE];
+
+  if((numbytes = recv(new_sockfd, username_buf, MAXDATASIZE-1, 0)) == -1) {
+    perror("recv");
+    exit(EXIT_FAILURE);
+  }
+  username_buf[numbytes] = '\0';
+
+  if(display_status) {
+    printf("   Username received: '%s'\n", username_buf);
+  }
+
+  if((dup2(new_sockfd, 1))!= 1 || (dup2(new_sockfd, 2)) != 2) {
+    perror("dup2");
+  }
+  close(new_sockfd);
+
+  if((execl("/usr/bin/finger", "finger", username_buf, NULL)) == -1) {
+    perror("execl");
+  };
+
+  exit(EXIT_FAILURE); // code should not reach this point using execl()
+                      // in other cases, reaching here indicates success
 }
