@@ -7,6 +7,8 @@ INCLUDED: fingerserver.cpp
           fingerclient.cpp
           Makefile
           README.txt
+REFERENCED: Beej's Guide to Network Programming, 8 June 2016,
+            http://beej.us/guide/bgnet/output/html/multipage/index.html
 
 CONTENTS
 --------
@@ -50,10 +52,10 @@ into the command line:
     ./fingerserver
 Or start the SERVER on a specified Port Number by typing into the command line:
     ./fingerserver <port_number>
-          example: "./fingerserver 10042"
+          example: ./fingerserver 10042
 Note: Port number must be between 10000 and 13000 (inclusive)
 
 After the server is running, in a new console (or multiple consoles), run the
 CLIENT program by typing into the command line:
     ./fingerclient <username@hostname:server_port>
-          example:  "./fingerclient griecoa1@cs1.seattleu.edu:10042"
+          example:  ./fingerclient griecoa1@cs1.seattleu.edu:10042

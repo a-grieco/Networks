@@ -1,7 +1,7 @@
 /* Adrienne Grieco
  * Simple Client/Server Warmup Project
  * 10/05/2017
- * fingerclient.cpp */
+ * fingerserver.cpp */
 
  /* fingerserver using TCP connection for multiple fingerclient connections */
  // IP Address: cs1 or cs2.seattleu.edu, Port Number: 10042 (default)
@@ -13,10 +13,12 @@
 #include <string.h>
 #include <sys/types.h>
 #include <sys/socket.h>
+#include <sys/wait.h>
 #include <netinet/in.h>
 #include <netdb.h>
 #include <iostream>
 #include <signal.h>
+#include <errno.h>
 
 #define DISPLAY_STATUS false    // prints server status if set to true
 
@@ -29,6 +31,8 @@ void set_port_number(char* port_buf, int port_int);
 void create_and_bind_to_socket(int& sockfd, const char* port_buf);
 void send_response_to_client(int new_sockfd);
 void clean_exit(int flag);
+void reap_zombie_processes(struct sigaction& sa);
+void sigchild_handler(int s);
 
 int main(int argc, char * argv[]) {
 
@@ -49,6 +53,7 @@ int main(int argc, char * argv[]) {
 
   int sockfd, new_sockfd;
   struct sockaddr_storage client_addr;
+  struct sigaction sa;
   socklen_t addr_size;
   pid_t pid;
 
@@ -60,6 +65,8 @@ int main(int argc, char * argv[]) {
     exit(EXIT_FAILURE);
   };
   printf("Server listening for connections...\n");
+
+  reap_zombie_processes(sa);
 
   // accept incomming connections
   while(true) {
@@ -153,11 +160,6 @@ void create_and_bind_to_socket(int& sockfd, const char* port_buf) {
   }
 }
 
-/* Helps to ensure port is freed upoon a "rough" exit from a program */
-void clean_exit(int flag) {
-  exit(EXIT_SUCCESS);
-}
-
 /* Executes child process of sending finger service data to fingerclient;
  * ensures child socket is closed upon completion. */
 void send_response_to_client(int new_sockfd) {
@@ -188,3 +190,28 @@ void send_response_to_client(int new_sockfd) {
   exit(EXIT_FAILURE); // code should not reach this point using execl()
                       // in other cases, reaching here indicates success
 }
+
+/* Helps to ensure port is freed upoon a "rough" exit from a program */
+void clean_exit(int flag) {
+  exit(EXIT_SUCCESS);
+}
+
+/* Reaps terminated child processes after they exit. */
+void reap_zombie_processes(struct sigaction& sa) {
+  sa.sa_handler = sigchild_handler;
+  sigemptyset(&sa.sa_mask);
+  sa.sa_flags = SA_RESTART;
+  if(sigaction(SIGCHLD, &sa, NULL) == -1) {
+    perror("sigaction");
+    exit(EXIT_FAILURE);
+  }
+}
+
+/* Collects terminated "zombie" child processes if present, otherwise exits
+ * loop. (Zombie signals are added to sa_mask of sigaction sa for removal.) */
+ void sigchild_handler(int s) {
+   // save and restore error number to prevent from being overwritten
+   int saved_errno = errno;
+   while(waitpid(-1, NULL, WNOHANG) > 0);
+   errno = saved_errno;
+ }
