@@ -1,7 +1,11 @@
-/* fingerclient using TCP connection to connect to fingerserver
- * IP Address: cs1.seattleu.edu, Port Number: 10042
- * (5th on roster: using Port Numbers 10040-10049) */
-// TODO: test on cs2.seattleu.edu
+/* Adrienne Grieco
+ * Simple Client/Server Warmup Project
+ * 10/05/2017
+ * fingerclient.cpp */
+
+/* fingerclient using TCP connection to connect to fingerserver */
+// IP Address: cs1 or cs2.seattleu.edu, Port Number: 10042 (default)
+// (5th on roster: using Port Numbers 10040-10049)
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -30,7 +34,7 @@ int main(int argc, char *argv[]) {
 
   if(argc < 2 || parse_user_arg(username, hostname, server_port,
       std::string(argv[1])) == false) {
-    fprintf(stderr, "usage %s username@hostname:server_port\n", argv[0]);
+    fprintf(stderr, "usage: %s username@hostname:server_port\n", argv[0]);
     exit(EXIT_FAILURE);
   }
 

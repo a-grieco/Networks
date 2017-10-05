@@ -1,7 +1,11 @@
-/* fingerserver using TCP connection for multiple fingerclient connections
-* IP Address: cs1.seattleu.edu, Port Number: 10042
-* (5th on roster: using Port Numbers 10040-10049) */
-// TODO: test on cs2.seattleu.edu
+/* Adrienne Grieco
+ * Simple Client/Server Warmup Project
+ * 10/05/2017
+ * fingerclient.cpp */
+
+ /* fingerserver using TCP connection for multiple fingerclient connections */
+ // IP Address: cs1 or cs2.seattleu.edu, Port Number: 10042 (default)
+ // (5th on roster: using Port Numbers 10040-10049)
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -14,13 +18,14 @@
 #include <iostream>
 #include <signal.h>
 
+#define DISPLAY_STATUS false    // prints server status if set to true
+
 #define DEFAULT_PORT_NUMBER 10042
 #define MAXDATASIZE 100         // max size of client's username
 #define CONNECTIONS_ALLOWED 10  // max number of clients serviceable
 
-#define DISPLAY_STATUS true     // prints server status if set to true
-
 bool port_number_is_valid(int& port_int, int port_number_arg);
+void set_port_number(char* port_buf, int port_int);
 void create_and_bind_to_socket(int& sockfd, const char* port_buf);
 void send_response_to_client(int new_sockfd);
 void clean_exit(int flag);
@@ -31,29 +36,21 @@ int main(int argc, char * argv[]) {
   char port_buf[5];
 
   if(argc > 2) {
-    fprintf(stderr, "usage %s or %s server_port\n", argv[0]);
+    fprintf(stderr, "usage: %s or %s server_port\n", argv[0]);
     exit(EXIT_FAILURE);
   }
 
   // reassign port number if user includes valid argument
   if(argc == 2 && !port_number_is_valid(port_int, atoi(argv[1]))) {
-    fprintf(stderr, "usage %s server_port (10000-13000 allowable)\n", argv[0]);
+    fprintf(stderr, "usage: %s server_port (10000-13000 allowable)\n", argv[0]);
     exit(EXIT_FAILURE);
   }
-
-  int n = sprintf(port_buf, "%d", port_int);
-  if(n < 5) {
-    fprintf(stderr, "Assignment to port number failed.\n");
-    exit(EXIT_FAILURE);
-  }
-  if(DISPLAY_STATUS) {
-    printf("Server connecting to port number: %s\n", port_buf);
-  }
+  set_port_number(port_buf, port_int);
 
   int sockfd, new_sockfd;
   struct sockaddr_storage client_addr;
   socklen_t addr_size;
-  pid_t pid;  // child process id
+  pid_t pid;
 
   create_and_bind_to_socket(sockfd, port_buf);
 
@@ -62,10 +59,7 @@ int main(int argc, char * argv[]) {
     perror("listen");
     exit(EXIT_FAILURE);
   };
-
-  if(DISPLAY_STATUS) {
-    printf("Server listening for connections...\n");
-  }
+  printf("Server listening for connections...\n");
 
   // accept incomming connections
   while(true) {
@@ -105,6 +99,18 @@ int main(int argc, char * argv[]) {
      return true;
    }
    return false;
+ }
+
+/* Convert port number into a usable format for socket connection */
+ void set_port_number(char* port_buf, int port_int) {
+   int n = sprintf(port_buf, "%d", port_int);
+   if(n < 5) {
+     fprintf(stderr, "failed to set port number: %d\n", port_int);
+     exit(EXIT_FAILURE);
+   }
+   if(DISPLAY_STATUS) {
+     printf("Server connecting to port number: %s\n", port_buf);
+   }
  }
 
 /* Create a socket and bind to it based on the defined port number or print

@@ -24,24 +24,36 @@ service data for that username.
 2. BASIC ASSUMPTIONS AND INFORMATION
 ------------------------------------
 SERVER:
-Port Number:  automatically set to *10042*
-# Connections:  maximum of *10* client connections allowed simultaneously
-Client Request: server receives a *username* from a client which may not exceed
-                100 characters; otherwise client request is rejected
-
+Port Number:    Defaults to 10042 unless specified by user.
+                A Port Number defined by the user must be between 10000 and
+                13000 (inclusive) or it will be rejected.
+# Connections:  Maximum of 10 client connections allowed simultaneously.
+Client Request: The username received from a client may not exceed 100
+                characters; otherwise the request is rejected.
+Display Status: Set DISPLAY_STATUS to true to display the Port Number on which
+                the Server is running and client requests as they are received.
+                If turned off, server only displays listening status when socket
+                binding is complete.
+CLIENT:
+Console Argument: Must match the form <username@hostname:server_port>
+                Username must be at least 1 and no more than 100 characters long
+                Hostname and Server Port must match the fingerserver
 
 3. COMPILING AND RUNNING THE PROGRAM
 ------------------------------------
 Use "make" to compile the client and server into executables:
   fingerclient and fingerserver
-Note: "make clean" will remove these executables.
+Note: "make clean" will remove executables.
 
-Start the SERVER on Port Number 10042 (automatically selected) by typing into
-the command line:
+Start the SERVER on Port Number 10042 (automatically selected) by typing
+into the command line:
     ./fingerserver
+Or start the SERVER on a specified Port Number by typing into the command line:
+    ./fingerserver <port_number>
+          example: "./fingerserver 10042"
+Note: Port number must be between 10000 and 13000 (inclusive)
 
-After the server is running, in a new console (or multiple new consoles), run
-the CLIENT program(s) by typing into the command line:
+After the server is running, in a new console (or multiple consoles), run the
+CLIENT program by typing into the command line:
     ./fingerclient <username@hostname:server_port>
           example:  "./fingerclient griecoa1@cs1.seattleu.edu:10042"
-          Note: the server's Port Number will always be set to 10042.
