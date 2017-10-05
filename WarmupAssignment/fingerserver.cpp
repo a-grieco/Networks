@@ -14,24 +14,48 @@
 #include <iostream>
 #include <signal.h>
 
-#define PORT_NUMBER "10042"
+#define DEFAULT_PORT_NUMBER 10042
 #define MAXDATASIZE 100         // max size of client's username
 #define CONNECTIONS_ALLOWED 10  // max number of clients serviceable
 
-bool display_status = true;
+#define DISPLAY_STATUS true     // prints server status if set to true
 
-void create_and_bind_to_socket(int& sockfd);
+bool port_number_is_valid(int& port_int, int port_number_arg);
+void create_and_bind_to_socket(int& sockfd, const char* port_buf);
 void send_response_to_client(int new_sockfd);
 void clean_exit(int flag);
 
 int main(int argc, char * argv[]) {
+
+  int port_int = DEFAULT_PORT_NUMBER; // default used without user argument
+  char port_buf[5];
+
+  if(argc > 2) {
+    fprintf(stderr, "usage %s or %s server_port\n", argv[0]);
+    exit(EXIT_FAILURE);
+  }
+
+  // reassign port number if user includes valid argument
+  if(argc == 2 && !port_number_is_valid(port_int, atoi(argv[1]))) {
+    fprintf(stderr, "usage %s server_port (10000-13000 allowable)\n", argv[0]);
+    exit(EXIT_FAILURE);
+  }
+
+  int n = sprintf(port_buf, "%d", port_int);
+  if(n < 5) {
+    fprintf(stderr, "Assignment to port number failed.\n");
+    exit(EXIT_FAILURE);
+  }
+  if(DISPLAY_STATUS) {
+    printf("Server connecting to port number: %s\n", port_buf);
+  }
 
   int sockfd, new_sockfd;
   struct sockaddr_storage client_addr;
   socklen_t addr_size;
   pid_t pid;  // child process id
 
-  create_and_bind_to_socket(sockfd);
+  create_and_bind_to_socket(sockfd, port_buf);
 
   // listen for incomming client connections
   if(listen(sockfd, CONNECTIONS_ALLOWED) == -1) {
@@ -39,7 +63,7 @@ int main(int argc, char * argv[]) {
     exit(EXIT_FAILURE);
   };
 
-  if(display_status) {
+  if(DISPLAY_STATUS) {
     printf("Server listening for connections...\n");
   }
 
@@ -73,9 +97,19 @@ int main(int argc, char * argv[]) {
   return 0;
 }
 
+/* Assign user specified port number and return true if argument is valid, i.e.
+ * the number is between 10000 and 13000 (inclusive); otherwise return false. */
+ bool port_number_is_valid(int& port_int, int port_number_arg) {
+   if(port_number_arg >= 10000 && port_number_arg <=13000) {
+     port_int = port_number_arg;
+     return true;
+   }
+   return false;
+ }
+
 /* Create a socket and bind to it based on the defined port number or print
  * error and exit on failure. */
-void create_and_bind_to_socket(int& sockfd) {
+void create_and_bind_to_socket(int& sockfd, const char* port_buf) {
   struct addrinfo hints, *servinfo, *p;
   int rv;
 
@@ -85,7 +119,7 @@ void create_and_bind_to_socket(int& sockfd) {
   hints.ai_flags = AI_PASSIVE;  // uses current IP address
                                 // (clients expect cs1.seattleu.edu)
 
-  if((rv = getaddrinfo(NULL, PORT_NUMBER, &hints, &servinfo)) != 0) {
+  if((rv = getaddrinfo(NULL, port_buf, &hints, &servinfo)) != 0) {
     fprintf(stderr, "getaddrinfo: %s\n", gai_strerror(rv));
     exit(EXIT_FAILURE);
   }
@@ -130,17 +164,19 @@ void send_response_to_client(int new_sockfd) {
   }
   username_buf[numbytes] = '\0';
 
-  if(display_status) {
+  if(DISPLAY_STATUS) {
     printf("   Username received: '%s'\n", username_buf);
   }
 
   if((dup2(new_sockfd, 1))!= 1 || (dup2(new_sockfd, 2)) != 2) {
     perror("dup2");
+    exit(EXIT_FAILURE);
   }
   close(new_sockfd);
 
   if((execl("/usr/bin/finger", "finger", username_buf, NULL)) == -1) {
     perror("execl");
+    exit(EXIT_FAILURE);
   };
 
   exit(EXIT_FAILURE); // code should not reach this point using execl()

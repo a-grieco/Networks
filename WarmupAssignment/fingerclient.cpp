@@ -40,6 +40,7 @@ int main(int argc, char *argv[]) {
   // send username to server
   if(send(sockfd, username.c_str(), 13, 0) == -1) {
     perror("send");
+    exit(EXIT_FAILURE);
   }
 
   print_message_from_server(sockfd);
