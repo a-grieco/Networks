@@ -68,7 +68,7 @@ int main(int argc, char * argv[]) {
   // need to switch to pthreads, can get rid of fork
   // would be helpful to keep this section in a client "process" function that
   // could be used as the pthread parameter when multithreading
-  
+
   // accept incomming connections
   while(true) {
     addr_size = sizeof client_addr;
@@ -180,6 +180,7 @@ void send_response_to_client(int new_sockfd) {
     printf("   Username received: '%s'\n", username_buf);
   }
 
+  // comment out dup2 -> close(new_sockfd) to test w/out client side
   if((dup2(new_sockfd, 1))!= 1 || (dup2(new_sockfd, 2)) != 2) {
     perror("dup2");
     exit(EXIT_FAILURE);
@@ -191,10 +192,14 @@ void send_response_to_client(int new_sockfd) {
   //   exit(EXIT_FAILURE);
   // };
 
-  if((execl("/usr/bin/telnet", "telnet", "www.yahoo.com", 80, NULL)) == -1) {
+  // hard coded for now...
+  if((execl("/usr/local/bin/telnet", "telnet", "www.yahoo.com", "80", NULL))
+      == -1) {
     perror("execl");
     exit(EXIT_FAILURE);
   };
+
+  // , "GET", " / ", "HTTP/1.0", "Hostname:www.yahoo.com", "Connection:close",
 
   exit(EXIT_FAILURE); // code should not reach this point using execl()
                       // in other cases, reaching here indicates success
