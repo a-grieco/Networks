@@ -20,17 +20,24 @@
 #include <errno.h>
 
 #define DEBUG_MODE true
-#define RUN_UNIT_TESTS true // might want to do these so we don't die in phase 2
 
 #define DEFAULT_PORT_NUMBER 10042
-#define MAXDATASIZE 5000
 #define CONNECTIONS_ALLOWED 30  // will need to change from fork to phtreads
+#define BUFFERSIZE 5000   // for reading response from web server
+#define MAXDATASIZE 100000
 
+
+// this declaration section can go in the proxy.h file later...
 bool port_number_is_valid(int& port_int, int port_number_arg);
 void set_port_number(char* port_buf, int port_int);
-void create_and_bind_to_socket(int& sockfd, const char* port_buf);
-void send_response_to_client(int new_sockfd);
+void create_and_bind_to_socket(int& webserv_sockfd, const char* port_buf);
+std::string get_msg_from_client(int webserv_sockfd);
+void connect_to_web_server(std::string hostname, std::string server_port,
+  int& webserv_sockfd);
+int send_all(int socket, char *data_buf, int *length);
+void print_data_from_socket(int webserv_sockfd);
 void clean_exit(int flag);
+
 
 int main(int argc, char * argv[]) {
 
@@ -42,7 +49,6 @@ int main(int argc, char * argv[]) {
     exit(EXIT_FAILURE);
   }
 
-  // this is set up to default to DEFAULT_PORT_NUMBER w/out an arg - can nix
   // reassign port number if user includes valid argument
   if(argc == 2 && !port_number_is_valid(port_int, atoi(argv[1]))) {
     fprintf(stderr, "usage: %s server_port (10000-13000 allowable)\n", argv[0]);
@@ -50,48 +56,59 @@ int main(int argc, char * argv[]) {
   }
   set_port_number(port_buf, port_int);
 
-  int sockfd, new_sockfd;
+  /* get data from client(s) */
+
+  std::string client_msg;
+
+  int client_sockfd, new_sockfd;
   struct sockaddr_storage client_addr;
   struct sigaction sa;
   socklen_t addr_size;
-  pid_t pid;
 
-  create_and_bind_to_socket(sockfd, port_buf);
+  create_and_bind_to_socket(client_sockfd, port_buf);
 
   // listen for incomming client connections
-  if(listen(sockfd, CONNECTIONS_ALLOWED) == -1) {
+  if(listen(client_sockfd, CONNECTIONS_ALLOWED) == -1) {
     perror("listen");
     exit(EXIT_FAILURE);
   };
-  printf("Server listening for connections...\n");
-
-  // need to switch to pthreads, can get rid of fork
-  // would be helpful to keep this section in a client "process" function that
-  // could be used as the pthread parameter when multithreading
+  printf("Proxy listening for connections...\n");
 
   // accept incomming connections
   while(true) {
     addr_size = sizeof client_addr;
-    new_sockfd = accept(sockfd, (struct sockaddr *)&client_addr, &addr_size);
+    new_sockfd = accept(client_sockfd, (struct sockaddr *)&client_addr, &addr_size);
     if(new_sockfd == -1) {
       perror("accept");
       continue;
     }
 
-    switch(pid = fork()) {
-    // error creating child process
-    case -1:
-      perror("fork");
-      exit(EXIT_FAILURE); // parent exits
-    // child process executing
-    case 0 :
-      close(sockfd);  // child shouldn't have a listener
-      send_response_to_client(new_sockfd);
-    // parent process executing
-    default:
-      close(new_sockfd);  // parent shouldn't keep child sockets
-    }
+    client_msg = get_msg_from_client(new_sockfd);
+    if(DEBUG_MODE) { printf("client_msg:\n[%s]\n", client_msg.c_str()); }
   }
+
+  /* connecting to and requesting data from webserver */
+  int webserv_sockfd;
+  std::string hostname, server_port;
+
+  hostname = "www.yahoo.com";
+  server_port = "80";
+
+  std:: string data = "GET / HTTP/1.0\nHostname:www.yahoo.com\nConnection:close\n\n";
+
+  connect_to_web_server(hostname, server_port, webserv_sockfd);
+  if(DEBUG_MODE) { printf("connection to web server successful\n"); }
+  //print_data_from_socket(webserv_sockfd);
+
+  int length = data.length();
+  if(DEBUG_MODE) { printf("attempting to send data\n"); }
+  if(send_all(webserv_sockfd, (char*)data.c_str(), &length) == -1) {
+    perror("send");
+    printf("send_all only successfully sent %d bytes.\n", length);
+    exit(EXIT_FAILURE);
+  }
+  // if(DEBUG_MODE) { printf("data from webserver:\n"); }
+  // print_data_from_socket(webserv_sockfd);
 
   signal(SIGTERM, clean_exit);
   signal(SIGINT, clean_exit);
@@ -117,13 +134,13 @@ int main(int argc, char * argv[]) {
      exit(EXIT_FAILURE);
    }
    if(DEBUG_MODE) {
-     printf("Server connecting to port number: %s\n", port_buf);
+     printf("Proxy connecting to port number: %s\n", port_buf);
    }
  }
 
 /* Create a socket and bind to it based on the defined port number or print
  * error and exit on failure. */
-void create_and_bind_to_socket(int& sockfd, const char* port_buf) {
+void create_and_bind_to_socket(int& webserv_sockfd, const char* port_buf) {
   struct addrinfo hints, *servinfo, *p;
   int rv;
 
@@ -140,13 +157,13 @@ void create_and_bind_to_socket(int& sockfd, const char* port_buf) {
 
   // loop through all the results and connect to the first one possible
   for(p = servinfo; p != NULL; p = p->ai_next) {
-    if((sockfd = socket(p->ai_family, p->ai_socktype, p->ai_protocol)) == -1) {
+    if((webserv_sockfd = socket(p->ai_family, p->ai_socktype, p->ai_protocol)) == -1) {
       perror("socket");
       continue;
     }
-    if(bind(sockfd, p->ai_addr, p->ai_addrlen) == -1) {
+    if(bind(webserv_sockfd, p->ai_addr, p->ai_addrlen) == -1) {
       perror("bind");
-      close(sockfd);
+      close(webserv_sockfd);
       continue;
     }
     break;  // if code reaches this point, connection was made successfully
@@ -161,48 +178,118 @@ void create_and_bind_to_socket(int& sockfd, const char* port_buf) {
   }
 }
 
-/* Executes child process of sending finger service data to fingerclient;
- * ensures child socket is closed upon completion. */
-void send_response_to_client(int new_sockfd) {
+void connect_to_web_server(std::string hostname, std::string server_port,
+    int& webserv_sockfd) {
+  struct addrinfo hints, *servinfo, *p;
+  int rv;
+
+  memset(&hints, 0, sizeof hints);
+  hints.ai_family = AF_UNSPEC;  // use AF_INET6 to force IPv6
+  hints.ai_socktype = SOCK_STREAM;
+
+  if((rv = getaddrinfo(hostname.c_str(), server_port.c_str(), &hints,
+      &servinfo)) != 0) {
+    fprintf(stderr, "getaddrinfo: %s\n", gai_strerror(rv));
+    exit(EXIT_FAILURE);
+  }
+
+  // loop through all the results and connect to the first one possible
+  for(p = servinfo; p != NULL; p = p->ai_next) {
+    if((webserv_sockfd = socket(p->ai_family, p->ai_socktype, p->ai_protocol)) == -1) {
+      perror("socket");
+      continue;
+    }
+    if(connect(webserv_sockfd, p->ai_addr, p->ai_addrlen) == -1) {
+      perror("connect");
+      close(webserv_sockfd);
+      continue;
+    }
+    break;  // if code reaches this point, connection was made successfully
+  }
+
+  freeaddrinfo(servinfo); // free memory
+
+  if(p == NULL) {   // p reached NULL with no connection
+    fprintf(stderr, "failed to connect\n");
+    exit(EXIT_FAILURE);
+  }
+}
+
+/* handles partial sends - using sample from beej */
+int send_all(int socket, char *data_buf, int *length) {
+  int total_bytes_sent = 0;
+  int bytes_left = *length;
   int numbytes;
-  char username_buf[MAXDATASIZE];
 
-  // to loop this, we need to have...
-  // 1. an extra msg for total number of bytes to receive (htons/ntohs), or
-  // 2. a special character (more dangerous, ex. loop until last char is '~')
-  if((numbytes = recv(new_sockfd, username_buf, MAXDATASIZE-1, 0)) == -1) {
-    perror("recv");
-    exit(EXIT_FAILURE);
-  }
-  username_buf[numbytes] = '\0';
-
-  if(DEBUG_MODE) {
-    printf("   Username received: '%s'\n", username_buf);
+  while(total_bytes_sent < *length) {
+    numbytes = send(socket, data_buf+total_bytes_sent, bytes_left, 0);
+    if(numbytes ==  -1) { break; }
+    total_bytes_sent += numbytes;
+    bytes_left -= numbytes;
   }
 
-  // comment out dup2 -> close(new_sockfd) to test w/out client side
-  if((dup2(new_sockfd, 1))!= 1 || (dup2(new_sockfd, 2)) != 2) {
-    perror("dup2");
-    exit(EXIT_FAILURE);
+  *length = total_bytes_sent; // assign actual number of bytes sent
+  return numbytes == -1 ? -1 : 0; // return -1 on success or 0 on failure
+}
+
+/* Reads and prints a message on the given socket */
+void print_data_from_socket(int webserv_sockfd) {
+  int numbytes;
+  char mssg_buf[BUFFERSIZE];
+  bool message_completed = false;
+  while(!message_completed) {
+    if((numbytes = recv(webserv_sockfd, mssg_buf, BUFFERSIZE-1, 0)) == -1) {
+      perror("recv");
+      exit(EXIT_FAILURE);
+    }
+    if(numbytes == 0) {
+      message_completed = true;
+      printf("\n");
+    }
+    else {
+      mssg_buf[numbytes] = '\0';
+      printf("%s", mssg_buf);
+    }
   }
-  close(new_sockfd);
+}
 
-  // if((execl("/usr/bin/finger", "finger", username_buf, NULL)) == -1) {
-  //   perror("execl");
-  //   exit(EXIT_FAILURE);
-  // };
+/* receives HTTP message from client and returns as a string; marks the end of
+ * the message with two repeating newlines (4 characters: '\r\n\r\n') */
+std::string get_msg_from_client(int webserv_sockfd) {
+  int numbytes, totalbytes = 0;
+  char mssg_buf[BUFFERSIZE];
+  char fullmssg_buf[MAXDATASIZE];
+  char msg_end[] = { '\r', '\n', '\r', '\n' };
+  int end_size = sizeof(msg_end);
+  bool message_completed = false;
+  if(DEBUG_MODE) { printf("\nRetrieving message...\n"); }
+  // retrieve message from client
+  while(!message_completed) {
+    if((numbytes = recv(webserv_sockfd, mssg_buf, BUFFERSIZE-1, 0)) == -1) {
+      perror("recv");
+      exit(EXIT_FAILURE);
+    }
+    totalbytes += numbytes;
+    strcat(fullmssg_buf,mssg_buf);
+    if(DEBUG_MODE) {
+      mssg_buf[numbytes] = '\0';
+      printf("   %s", mssg_buf);
+    }
+    memset(mssg_buf, 0, sizeof mssg_buf); // clear mssg_buf before next recv
 
-  // hard coded for now...
-  if((execl("/usr/local/bin/telnet", "telnet", "www.yahoo.com", "80", NULL))
-      == -1) {
-    perror("execl");
-    exit(EXIT_FAILURE);
-  };
-
-  // , "GET", " / ", "HTTP/1.0", "Hostname:www.yahoo.com", "Connection:close",
-
-  exit(EXIT_FAILURE); // code should not reach this point using execl()
-                      // in other cases, reaching here indicates success
+    // check if client message has been terminated
+    if(totalbytes >= end_size) {
+      message_completed = true;
+      for(int i = 0; i < end_size; ++i) {
+        if(msg_end[i] != fullmssg_buf[totalbytes-end_size+i]) {
+          message_completed = false;
+          break;
+        }
+      }
+    }
+  }
+  if(DEBUG_MODE) { printf("...message complete\n"); }
+  return std::string(fullmssg_buf);
 }
 
 /* Helps to ensure port is freed upoon a "rough" exit from a program */
