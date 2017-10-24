@@ -108,29 +108,35 @@ int main(int argc, char * argv[]) {
     msg_is_valid = parse_client_msg(client_msg, webserv_host, webserv_path,
         webserv_port, headers);
 
+    // testing send to client
+    std::string message_test = "sending 123 test to client: 1 2 3.";
+    int m_length = message_test.length();
+    send_all(new_sockfd, (char*)message_test.c_str(), &m_length);
   }
 
   /* ********** connecting to and requesting data from webserver ********** */
-  // int webserv_sockfd;
-  //
-  // webserv_host = "www.yahoo.com";
-  // webserv_port = "80";
-  //
-  // std:: string data = "GET / HTTP/1.0\nwebserv_host:www.yahoo.com\nConnection:close\n\n";
-  //
-  // connect_to_web_server(webserv_host, webserv_port, webserv_sockfd);
-  // if(DEBUG_MODE) { printf("connection to web server successful\n"); }
-  // //print_data_from_socket(webserv_sockfd);
-  //
-  // int length = data.length();
-  // if(DEBUG_MODE) { printf("attempting to send data\n"); }
-  // if(send_all(webserv_sockfd, (char*)data.c_str(), &length) == -1) {
-  //   perror("send");
-  //   printf("send_all only successfully sent %d bytes.\n", length);
-  //   exit(EXIT_FAILURE);
-  // }
-  // if(DEBUG_MODE) { printf("data from webserver:\n"); }
-  // print_data_from_socket(webserv_sockfd);
+  int webserv_sockfd;
+
+  std::string webserv_host, webserv_port;
+
+  webserv_host = "www.yahoo.com";
+  webserv_port = "80";
+
+  std:: string data = "GET / HTTP/1.0\nHost:www.yahoo.com\nConnection:close\n\n";
+
+  connect_to_web_server(webserv_host, webserv_port, webserv_sockfd);
+  if(DEBUG_MODE) { printf("connection to web server successful\n"); }
+  //print_data_from_socket(webserv_sockfd);
+
+  int length = data.length();
+  if(DEBUG_MODE) { printf("attempting to send data\n"); }
+  if(send_all(webserv_sockfd, (char*)data.c_str(), &length) == -1) {
+    perror("send");
+    printf("send_all only successfully sent %d bytes.\n", length);
+    exit(EXIT_FAILURE);
+  }
+  if(DEBUG_MODE) { printf("data from webserver:\n"); }
+  print_data_from_socket(webserv_sockfd);
 
   signal(SIGTERM, clean_exit);
   signal(SIGINT, clean_exit);
