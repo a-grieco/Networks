@@ -471,9 +471,11 @@ bool verify_url(std::string url, std::string& host, std::string& path,
 
     // extract host (including port # if present)
     pos = url.find(second_delim);
+    // TODO: no path specified - check: IS THIS ALLOWABLE?
+    // at present - this will reject a url without a path (term: "/")
     if(pos == std::string::npos) { return false; }
     host = url.substr(0, pos);
-    url.erase(0, pos + second_delim.size());
+    url.erase(0, pos + second_delim.size());  //
     // extract port # if present
     pos = host.find(third_delim);
     if(pos == std::string::npos) {
@@ -488,7 +490,7 @@ bool verify_url(std::string url, std::string& host, std::string& path,
 
     // extract path
     path = url;
-    // TODO: check formatting? terms with .html? etc.?
+    // TODO: check formatting? terms with .html? etc.? does this need to exist? - check length.
 
     if(DEBUG_MODE) {
       printf("in verify_url\n");
@@ -503,10 +505,24 @@ bool verify_url(std::string url, std::string& host, std::string& path,
 /* parses headers into a vector of strings (each index as <name: value>) and
  * returns true; otherwise returns false for invalid formatting */
 bool parse_headers(std::string msg, std::vector<std::string> &headers) {
-  printf("parsing headers...\n");
-  // TODO: this
-  // parse by newline - each line will be one string entry in vector
-  // check each line for [header: value] format
+  if(DEBUG_MODE) { printf("parsing headers...\n"); }
+  // parse each header by newline
+  std::string delimiter = "\r\n";
+  std::size_t pos = 0;
+  while(!msg.empty()) {
+    pos = msg.find(delimiter);
+    headers.push_back(msg.substr(0, pos));
+    msg.erase(0, pos + delimiter.size());
+  }
+
+  if(DEBUG_MODE) {
+    printf("headers:\n");
+    for(std::vector<std::string>::iterator i = headers.begin();
+        i != headers.end(); ++i) {
+      printf("%s\n", (*i).c_str());
+    }
+  }
+  // TODO: check each line for [header: value] format
   return true;
 }
 
