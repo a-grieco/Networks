@@ -86,41 +86,20 @@ int main(int argc, char * argv[]) {
       continue;
     }
 
-    std::string client_msg;
-    std::vector<std::string> headers;
-    bool msg_is_valid;
+    std::string client_msg, data;
     client_msg = get_msg_from_client(new_sockfd);
     if(DEBUG_MODE) { printf("client_msg:\n[%s]\n", client_msg.c_str()); }
 
-    std::string webserv_host, webserv_path, webserv_port;
-    msg_is_valid = parse_client_msg(client_msg, webserv_host, webserv_path,
-        webserv_port, headers);
-
-    if(msg_is_valid) {
-      // TODO: draw method & http_version from parse class when finished
-      std::string method =  "GET";
-      std::string http_version = "HTTP/1.0";
-      std::string webserv_req;
-
-      if(webserv_path.empty()) {
-        webserv_req = method + " / " + http_version + "\nHost:" + webserv_host +
-          "\nConnection:close\n";
+    // get webserver request or client error message
+    if(get_parsed_data(client_msg, data)) {
+      // have web server request - send to web server
+      if(DEBUG_MODE) {
+        printf("successful parse\nweb server request:\n%s\n", data.c_str());
       }
-      else {
-        webserv_req = method + " /" + webserv_path + " " + http_version +
-          "\nHost:" +  webserv_host + "\nConnection:close\n";
-      }
-
-      for(std::vector<std::string>::iterator i = headers.begin();
-          i != headers.end(); ++i) {
-        webserv_req += *i + "\n";
-      }
-      webserv_req += "\n";
-
-      printf("test request message:\n%s\n", webserv_req.c_str());
     }
     else {
-      printf("SEND CLIENT 500 ERROR MESSAGE\n%s\n");
+      // have error message - send to client
+      if(DEBUG_MODE) { printf("failed parse\nerror:\n%s\n", data.c_str()); }
     }
 
     // insert wevserver connnection/request code here
