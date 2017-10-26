@@ -32,7 +32,7 @@
 #define MAXDATASIZE 100000
 
 
-// this declaration section can go in the proxy.h file later...
+// this declaration section can go in a proxy.h file or can custom refactor...
 bool port_number_is_valid(int& port_int, int port_number_arg);
 void set_port_number(char* port_buf, int port_int);
 void create_and_bind_to_socket(int& webserv_sockfd, const char* port_buf);
@@ -61,8 +61,7 @@ int main(int argc, char * argv[]) {
   }
   set_port_number(port_buf, port_int);
 
-  /* *********************** get data from client(s) *********************** */
-
+  // get data from client(s)
   int client_sockfd, new_sockfd;
   struct sockaddr_storage client_addr;
   struct sigaction sa;
@@ -86,56 +85,53 @@ int main(int argc, char * argv[]) {
       continue;
     }
 
-    std::string client_msg, data;
+    int webserv_sockfd;
+    std::string client_msg, webserv_host, webserv_port, data;
     client_msg = get_msg_from_client(new_sockfd);
     if(DEBUG_MODE) { printf("client_msg:\n[%s]\n", client_msg.c_str()); }
 
-    // get webserver request or client error message
-    if(get_parsed_data(client_msg, data)) {
-      // have web server request - send to web server
-      if(DEBUG_MODE) {
-        printf("successful parse\nweb server request:\n%s\n", data.c_str());
+    // get web server host, port, and request or client error message
+    if(get_parsed_data(client_msg, webserv_host, webserv_port, data)) {
+      if(DEBUG_MODE) { printf("web server request:\n%s\n", data.c_str()); }
+
+      connect_to_web_server(webserv_host, webserv_port, webserv_sockfd);
+      if(DEBUG_MODE) { printf("connection to web server successful\n"); }
+      // print_data_from_socket(webserv_sockfd); // get anything? nope.
+
+      int length = data.length();
+      if(DEBUG_MODE) { printf("sending data to web server...\n"); }
+      // send data request to web server
+      if(send_all(webserv_sockfd, (char*)data.c_str(), &length) == -1) {
+        perror("send");
+        printf("send_all only successfully sent %d bytes.\n", length);
+        exit(EXIT_FAILURE);
       }
+
+      if(DEBUG_MODE) {
+        printf("data received from web server:\n");
+        print_data_from_socket(webserv_sockfd);
+      }
+
+      /*
+       * TODO: instead of printing data (above) - redirect to client new_sockfd
+       *       (insert client redirection code here)
+       * NOTE:  BE SURE TO COMMENT OUT/DELETE print_data_from_socket (ABOVE) OR
+       *        THERE WILL BE NOTHING LEFT ON THE SOCKET TO READ
+       */
+
     }
     else {
-      // have error message - send to client
-      if(DEBUG_MODE) { printf("failed parse\nerror:\n%s\n", data.c_str()); }
+      // send error message to client
+      if(DEBUG_MODE) { printf("client error: %s\n", data.c_str()); }
+      int length = data.length();
+      send_all(new_sockfd, (char*)data.c_str(), &length);
     }
 
-    // insert wevserver connnection/request code here
-
-    // testing send to client
+    // test send to client
     std::string message_test = "sending 123 test to client: 1 2 3.";
     int m_length = message_test.length();
     send_all(new_sockfd, (char*)message_test.c_str(), &m_length);
   }
-
-  /* ********** connecting to and requesting data from webserver ********** */
-  int webserv_sockfd;
-
-  std::string webserv_host, webserv_port;
-
-  webserv_host = "www.yahoo.com";
-  webserv_port = "80";
-
-  std:: string data = "GET / HTTP/1.0\nHost:www.yahoo.com\nConnection:close\n\n";
-
-  connect_to_web_server(webserv_host, webserv_port, webserv_sockfd);
-  if(DEBUG_MODE) { printf("connection to web server successful\n"); }
-  //print_data_from_socket(webserv_sockfd);
-
-  int length = data.length();
-  if(DEBUG_MODE) { printf("attempting to send data\n"); }
-  if(send_all(webserv_sockfd, (char*)data.c_str(), &length) == -1) {
-    perror("send");
-    printf("send_all only successfully sent %d bytes.\n", length);
-    exit(EXIT_FAILURE);
-  }
-  if(DEBUG_MODE) { printf("data from webserver:\n"); }
-  print_data_from_socket(webserv_sockfd);
-
-  /* ********** connecting to and requesting data from webserver ********** */
-
 
   signal(SIGTERM, clean_exit);
   signal(SIGINT, clean_exit);
@@ -145,16 +141,16 @@ int main(int argc, char * argv[]) {
 
 /* Assign user specified port number and return true if argument is valid, i.e.
  * the number is between 10000 and 13000 (inclusive); otherwise return false. */
- bool port_number_is_valid(int& port_int, int port_number_arg) {
-   if(port_number_arg >= 10000 && port_number_arg <=13000) {
-     port_int = port_number_arg;
-     return true;
-   }
-   return false;
- }
+bool port_number_is_valid(int& port_int, int port_number_arg) {
+  if(port_number_arg >= 10000 && port_number_arg <=13000) {
+    port_int = port_number_arg;
+    return true;
+  }
+  return false;
+}
 
 /* Convert port number into a usable format for socket connection */
- void set_port_number(char* port_buf, int port_int) {
+void set_port_number(char* port_buf, int port_int) {
    int n = sprintf(port_buf, "%d", port_int);
    if(n < 5) {
      fprintf(stderr, "failed to set port number: %d\n", port_int);
@@ -165,8 +161,8 @@ int main(int argc, char * argv[]) {
    }
  }
 
-/* Create a socket and bind to it based on the defined port number or print
- * error and exit on failure. */
+/* Create a socket for the proxy and bind to it based on the defined port number
+ * or print error and exit on failure. */
 void create_and_bind_to_socket(int& webserv_sockfd, const char* port_buf) {
   struct addrinfo hints, *servinfo, *p;
   int rv;
@@ -205,6 +201,7 @@ void create_and_bind_to_socket(int& webserv_sockfd, const char* port_buf) {
   }
 }
 
+/* establishes connection to client's requested web server */
 void connect_to_web_server(std::string webserv_host, std::string webserv_port,
     int& webserv_sockfd) {
   struct addrinfo hints, *servinfo, *p;
@@ -242,7 +239,7 @@ void connect_to_web_server(std::string webserv_host, std::string webserv_port,
   }
 }
 
-/* handles partial sends - using sample from beej */
+/* handles partial sends - based on sample from beej */
 int send_all(int socket, char *data_buf, int *length) {
   int total_bytes_sent = 0;
   int bytes_left = *length;
