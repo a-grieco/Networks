@@ -13,9 +13,12 @@
 #include <vector>
 #include <sstream>
 #include <iterator>
+#include <sys/types.h>
+#include <sys/socket.h>
+#include <netdb.h>
 
 enum Error { e_method, e_url, e_http_vers, e_http_prefix, e_host, e_dns,
-  e_path, e_port, e_headers };
+  e_path, e_port, e_headers, e_get_addr_info };
 
 bool get_parsed_data(std::string client_msg, std::string& webserv_host,
   std::string& webserv_port, std::string& data);

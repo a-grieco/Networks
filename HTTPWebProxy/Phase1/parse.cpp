@@ -36,7 +36,6 @@ bool get_parsed_data(std::string client_msg, std::string& webserv_host,
   std::string host, path, port;
   std::vector<std::string> headers;
   std::vector<Error> errnos;
-
   // if parse successful, generate web server request and return true
   if(parse_client_msg(client_msg, host, path, port, headers, errnos)) {
     webserv_host = host;
@@ -120,6 +119,9 @@ void include_error_detail(std::string& data, std::vector<Error>& errnos) {
         data += "Invalid formatting of header(s): should be [name: value] "
                 "where name has no interrupting whitespace\n";
         break;
+      case e_get_addr_info:
+        data += "Get_addr_info failed to resolve the hostname with DNS\n";
+        break;
     }
   }
 }
@@ -192,6 +194,7 @@ bool parse_headers(std::string msg, std::vector<std::string> &headers,
  * host, path, and port number; otherwise returns false */
 bool parse_url(std::string url, std::string& host, std::string& path,
     std::string& port, std::vector<Error>& errnos) {
+  struct addrinfo hints, *servinfo, *p;
   trim(url);
 
   if(!extract_and_verify_http_prefix(url)) {
@@ -202,8 +205,12 @@ bool parse_url(std::string url, std::string& host, std::string& path,
   if(!extract_host_and_port(url, host, port, errnos)) {
     return false;
   }
-
+  
   // TODO: DNS host verification
+  if (getaddrinfo(NULL, host.c_str(), &hints, &servinfo) != 0) {
+    errnos.push_back(e_get_addr_info);
+    return false;
+  } 
 
   path = url;
   if(PATH_REQUIRED) {
