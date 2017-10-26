@@ -83,7 +83,7 @@ void generate_client_error_msg(std::string& data, std::vector<Error>& errnos) {
   std::string http_vers = VALID_HTTP_VERS, internal_errno = INTERNAL_ERROR;
   data = http_vers + " " + internal_errno + " Internal Error\n";
 
-  if(DEBUG_MODE) { include_error_detail(data, errnos); }
+  if(INCLUDE_CUSTOM_ERROR_MSGS) { include_error_detail(data, errnos); }
 }
 
 /* adds additional information to client error message for debugging purposes */

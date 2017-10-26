@@ -1,0 +1,105 @@
+-------------------------------
+README: A Simple HTTP Web Proxy
+-------------------------------
+AUTHORs:  Madeline Wong
+          Matthew Irwin
+          Adrienne Grieco
+DATE:  10/29/2017
+INCLUDED: parse.h
+          parse.cpp
+          proxy.h // TODO
+          proxy.cpp
+          Makefile
+          README
+REFERENCED: Beej's Guide to Network Programming, 8 June 2016,
+            http://beej.us/guide/bgnet/output/html/multipage/index.html
+
+CONTENTS
+--------
+    1. Purpose and Design Decisions
+    2. Strengths & Weaknesses // TODO
+    3. Contributions          // TODO
+    4. Compiling and Running the Program
+
+1. PURPOSE AND DESIGN DECISIONS
+-------------------------------
+This proxy is designed to intercept HTTP requests from clients, parse and verify
+those requests, and (if valid) send requests to the client's desired web server,
+return the web server's response to the client, and then close the connection // TODO (verify)
+with the client. Upon receiving an invalid client request, the proxy will reply
+to the client with a status line indicating that an internal error occurred.
+
+CLIENT:
+Connection: Will use telnet to connect to the proxy
+Arguments:  A request line optionally followed by as many headers as desired
+    First line: HTTP method to be used, only 'GET' accepted
+                Absolute URI**, formatted as 'http://host[:port]/path'
+                HTTP version to be used, only 'HTTP/1.0' accepted
+    Additional line(s):
+                Formatted as 'name: value' (one header per line) where name has
+                no embedded spaces, i.e. 'Content-type'=ok, 'Content type'=error
+  **  URL 'http://' prefix required
+      Port number will default to '80' if not included
+      Proxy is configurable to either require a path or not (see below).
+
+PROXY:
+Port Number:  Defaults to 10042 unless specified by user.
+              A Port Number defined by the user must be between 10000 and
+              13000 (inclusive) or it will be rejected.
+Number Connections:  Only one client connection allowed at a time (Phase 1).
+Client Request: A request line optionally followed by as many headers as desired
+    First line: 'GET http://host[:port]/path HTTP/1.0'
+    Additional line(s): 'name: value'
+
+Notes on Parsing:
+    Request line from client:
+      - Only 'GET' method accepted and 'HTTP/1.0' version accepted.
+      - Absolute URI requires 'http://' URL prefix
+      - Port number defaults to '80' if not included
+      - Proxy can be configured to require a path or not.
+        ~ if PATH_REQUIRED set to true-> client receives an error if path absent
+        ~ if PATH_REQUIRED set to false-> replaces path with '/' and includes
+          a default  'GET / HTTP/1.0' in the request to the web server
+    Header lines from client (if present):
+      - name is not accepted if it contains embedded spaces
+      - header is formatted so that there will be no space between name and ':'
+      - duplicate 'Host:' and/or 'Connection:' headers are removed to default to
+        using the host provided in the absolute URI and 'Connection: close'
+
+2. STRENGTHS AND WEAKNESSES
+---------------------------
+...eventualy will check DNS for valid host name before connection
+...handles partial sends and receives (all loops)
+
+...not multithreaded yet, only accepts one client at a time
+.. does no filtering of content received from web server
+
+3. CONTRIBUTIONS
+----------------
+All of us worked together to come up with the design of the program. Maddie and
+Adrienne focused on parsing and validating the client request. Matt focused on
+accurately rerouting the web server data to the client. Piecing the components
+together was a collaborative effort.
+
+4. COMPILING AND RUNNING THE PROGRAM
+------------------------------------
+Use "make" to compile the proxy into an executable: proxy
+Use "make clean" to remove executable.
+
+Start the proxy on Port Number 10042 (automatically selected) by typing into the
+command line:
+    ./proxy
+Or start the proxy on a specified Port Number by typing into the command line:
+    ./proxy <port_number>
+    example:  ./proxy 10042
+Note: Port number must be between 10000 and 13000 (inclusive)
+
+After the proxy is running, in a new console (now on the client side) telnet
+into the proxy by typing:
+    telnet <hostname> <port>
+    example: telnet localhost 10042
+Send the proxy an HTTP request.
+    example:  GET http://www.yahoo.com/index.html HTTP/1.0
+On the client side, a response should be received from the proxy that either
+contains and error status line of 'HTTP/1.0 500 Internal Error' or a response
+from the web server containing the requested data
