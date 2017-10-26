@@ -102,7 +102,7 @@ void include_error_detail(std::string& data, std::vector<Error>& errnos) {
         data += "Invalid HTTP version: only HTTP/1.0 accepted\n";
         break;
       case e_http_prefix:
-        data += "Invalid protocol prefix in URL: only 'http://'' accepted\n";
+        data += "Invalid protocol prefix in URL: only 'http://' accepted\n";
         break;
       case e_host:
         data += "Missing host\n";
