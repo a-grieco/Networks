@@ -42,7 +42,7 @@ void connect_to_web_server(std::string webserv_host, std::string webserv_port,
 int send_all(int socket, char *data_buf, int *length);
 void print_data_from_socket(int webserv_sockfd);
 void clean_exit(int flag);
-
+void proxy_send_data_from_socket(int webserv_sockfd, int new_sockfd);
 
 int main(int argc, char * argv[]) {
 
@@ -109,7 +109,7 @@ int main(int argc, char * argv[]) {
 
       if(DEBUG_MODE) {
         printf("data received from web server:\n");
-        print_data_from_socket(webserv_sockfd);
+        proxy_send_data_from_socket(webserv_sockfd, new_sockfd);
       }
 
       /*
@@ -126,11 +126,11 @@ int main(int argc, char * argv[]) {
       int length = data.length();
       send_all(new_sockfd, (char*)data.c_str(), &length);
     }
-
+    close(new_sockfd);
     // test send to client
-    std::string message_test = "sending 123 test to client: 1 2 3.";
+    /*std::string message_test = "sending 123 test to client: 1 2 3.";
     int m_length = message_test.length();
-    send_all(new_sockfd, (char*)message_test.c_str(), &m_length);
+    send_all(new_sockfd, (char*)message_test.c_str(), &m_length);*/
   }
 
   signal(SIGTERM, clean_exit);
@@ -315,7 +315,30 @@ std::string get_msg_from_client(int webserv_sockfd) {
   if(DEBUG_MODE) { printf("...message complete\n"); }
   return std::string(fullmssg_buf);
 }
-
+/* Reads a message from a socket and sends it to a client */
+void proxy_send_data_from_socket(int webserv_sockfd, int new_sockfd) {
+  int numbytes;
+  char mssg_buf[BUFFERSIZE];
+  bool message_completed = false;
+  while(!message_completed) {
+    if((numbytes = recv(webserv_sockfd, mssg_buf, BUFFERSIZE-1, 0)) == -1) {
+      perror("recv");
+      exit(EXIT_FAILURE);
+    }
+    if(numbytes == 0) {
+      message_completed = true;
+      std::string proxy_string = "\n";
+      int proxy_string_length = proxy_string.length();
+      send_all(new_sockfd, (char*)proxy_string.c_str(), &proxy_string_length);
+    }
+    else {
+      mssg_buf[numbytes] = '\0';
+      std::string proxy_string = mssg_buf;
+      int proxy_string_length = proxy_string.length();
+      send_all(new_sockfd, (char*)proxy_string.c_str(), &proxy_string_length);
+    }
+  }
+}
 /* Helps to ensure port is freed upoon a "rough" exit from a program */
 void clean_exit(int flag) {
   exit(EXIT_SUCCESS);
