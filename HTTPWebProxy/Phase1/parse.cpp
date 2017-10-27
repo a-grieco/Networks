@@ -5,6 +5,9 @@
 #include <stdlib.h>
 #include <unistd.h>
 #include <string.h>
+#include <sys/types.h>
+#include <sys/socket.h>
+#include <netdb.h>
 #include <iostream>
 #include <errno.h>
 #include <vector>
@@ -49,7 +52,7 @@ bool get_parsed_data(std::string client_msg, std::string& webserv_host,
           i == (headers.size()-1) ? "]" : " ");
       }
     }
-    generate_webserver_request(data, host, path, headers);
+    generate_webserver_request(data, host, path, port, headers);
     return true;
   }
 
@@ -63,10 +66,17 @@ bool get_parsed_data(std::string client_msg, std::string& webserv_host,
 
 /* generates a formated HTTP request for the web server requested */
 void generate_webserver_request(std::string& data, std::string& host,
-  std::string& path, std::vector<std::string>& headers) {
+  std::string& path, std::string& port, std::vector<std::string>& headers) {
   std::string method = VALID_METHOD, http_vers = VALID_HTTP_VERS;
-  std::string webserv_req = method + " /" + path + " " + http_vers +
-    "\nHost: " + host + "\nConnection: close\n";
+  std::string webserv_req;
+  if(is_match_caseins(DEFAULT_PORT, port)) {
+    webserv_req= method + " /" + path + " " + http_vers + "\nHost: " + host +
+      "\nConnection: close\n";
+  }
+  else {  // include port # in Host: header if not default port '80'
+    webserv_req= method + " /" + path + " " + http_vers + "\nHost: " + host +
+      ":" + port + "\nConnection: close\n";
+  }
   for(std::vector<std::string>::iterator it = headers.begin();
     it != headers.end(); ++it) {
       webserv_req += *it + "\n";
@@ -90,6 +100,10 @@ void include_error_detail(std::string& data, std::vector<Error>& errnos) {
   for(std::vector<Error>::iterator it = errnos.begin(); it != errnos.end();
       ++it) {
     switch(*it) {
+      case e_req_line:
+        data += "Invalid request line: expecting <METHOD> <URL> <HTTP VERSION>"
+                "\ni.e. 'GET http://hostname[:port]/path HTTP/1.0'\n";
+        break;
       case e_method:
         data += "Invalid HTTP method: only GET accepted\n";
         break;
@@ -107,20 +121,24 @@ void include_error_detail(std::string& data, std::vector<Error>& errnos) {
         data += "Missing host\n";
         break;
       case e_dns:
-        data += "Invalid host\n";
+        data += "Failed to resolve the hostname with DNS\n";
         break;
       case e_path:
-        data += "Missing path\n";
+        data += "Missing path: absolute URI required\n"
+                "i.e. http://hostname[:port]/path\n";
         break;
       case e_port:
         data += "Invalid port number, must be numeric\n";
         break;
       case e_headers:
-        data += "Invalid formatting of header(s): should be [name: value] "
-                "where name has no interrupting whitespace\n";
+        data += "Invalid formatting of header(s): should be [name: value]\n";
         break;
-      case e_get_addr_info:
-        data += "Get_addr_info failed to resolve the hostname with DNS\n";
+      case e_name_ws:
+        data += "Header name may not contain embedded whitespace,\n"
+                "i.e. 'Content-type' ok, 'Content type' results in error";
+        break;
+      case e_header_val:
+        data += "Header missing value. Expected format is [name: value]\n";
         break;
     }
   }
@@ -182,19 +200,15 @@ bool parse_headers(std::string msg, std::vector<std::string> &headers,
     std::vector<Error>& errnos) {
 
   if(extract_headers(msg, headers)) {
-    if(!verify_headers(headers)) {
-      errnos.push_back(e_headers);
-      return false; // headers invalid
-    }
+    return verify_headers(headers, errnos);
   }
-  return true;     // no headers present or headers valid
+  return true;     // no headers present
 }
 
 /* verifies that the url is correctly formatted and parses the web server's
  * host, path, and port number; otherwise returns false */
 bool parse_url(std::string url, std::string& host, std::string& path,
     std::string& port, std::vector<Error>& errnos) {
-  struct addrinfo hints, *servinfo, *p;
   trim(url);
 
   if(!extract_and_verify_http_prefix(url)) {
@@ -205,12 +219,17 @@ bool parse_url(std::string url, std::string& host, std::string& path,
   if(!extract_host_and_port(url, host, port, errnos)) {
     return false;
   }
-  
-  // TODO: DNS host verification
-  if (getaddrinfo(NULL, host.c_str(), &hints, &servinfo) != 0) {
-    errnos.push_back(e_get_addr_info);
+
+  //DNS host verification
+  struct addrinfo hints, *servinfo, *p;
+  memset(&hints, 0, sizeof hints);
+  hints.ai_family = AF_UNSPEC;
+  hints.ai_socktype = SOCK_STREAM;
+  if(getaddrinfo(host.c_str(), "http", &hints, &servinfo) != 0) {
+    errnos.push_back(e_dns);
     return false;
-  } 
+  }
+  freeaddrinfo(servinfo); // free memory (DNS verification successufl)
 
   path = url;
   if(PATH_REQUIRED) {
@@ -254,7 +273,10 @@ bool extract_request_elements(std::string req, std::string& method,
 
   // check that there are exactly three elements
   int num_elements = elements.size();
-  if(num_elements != 3) { return false; }
+  if(num_elements != 3) {
+    errnos.push_back(e_req_line);
+    return false;
+  }
 
   // assign each element to its respective variable
   method = elements.at(0);
@@ -359,7 +381,8 @@ bool verify_http_vers(std::string& http_vers) {
  * embedded whitespaces; otherwise returns false
  * Note: formats header to remove any whitespace between the name and ":" and
  * removes any duplicate 'Host' or 'Connection' headers */
-bool verify_headers(std::vector<std::string> &headers) {
+bool verify_headers(std::vector<std::string> &headers,
+    std::vector<Error> &errnos) {
   std::size_t pos = 0;
   std::string name_delim = ":";
   std::string whitespace = " \r\n\t";
@@ -373,16 +396,25 @@ bool verify_headers(std::vector<std::string> &headers) {
 
     orig_header = headers.at(i);
     pos = orig_header.find(name_delim);
-    if(pos == std::string::npos) { return false; }  // missing ':'
+    if(pos == std::string::npos) {  // missing ':'
+      errnos.push_back(e_headers);
+      return false;
+    }
 
     name = orig_header.substr(0, pos);
     value = orig_header.substr(pos);  // includes ":"
 
     trim(name);
     pos = name.find_first_of(whitespace);
-    if(pos != std::string::npos) { return false; }  // name has internal spaces
+    if(pos != std::string::npos) {  // name has internal spaces
+      errnos.push_back(e_name_ws);
+      return false;
+    }
     pos = value.find_first_not_of(whitespace);
-    if(pos == std::string::npos) { return false; }  // header has no value
+    if(pos == std::string::npos) {  // header has no value
+      errnos.push_back(e_header_val);
+      return false;
+    }
 
     headers.at(i) = name + value;
 

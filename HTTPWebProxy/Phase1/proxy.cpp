@@ -12,7 +12,6 @@
 #include <string.h>
 #include <sys/types.h>
 #include <sys/socket.h>
-#include <sys/wait.h>
 #include <netinet/in.h>
 #include <netdb.h>
 #include <iostream>
@@ -24,22 +23,25 @@
 
 #include "parse.h"
 
-#define DEBUG_MODE false
+// TODO: solve invalid port # problem
+// TODO: close client connection after x # of seconds
+
+#define DEBUG_MODE true
+#define INCLUDE_CUSTOM_ERROR_MSGS true  // if false, use only 500 Internal Error
 
 #define DEFAULT_PORT_NUMBER 10042
-#define CONNECTIONS_ALLOWED 1  // will need to change for phtreads
-#define BUFFERSIZE 5000   // for reading response from web server
-#define MAXDATASIZE 100000
+#define CONNECTIONS_ALLOWED 1 // will need to change for Phase 2
+#define BUFFERSIZE 10000
+#define MAXDATASIZE 100000    // max size of client HTTP request
 
-
-// this declaration section can go in a proxy.h file or can custom refactor...
 bool port_number_is_valid(int& port_int, int port_number_arg);
 void set_port_number(char* port_buf, int port_int);
 void create_and_bind_to_socket(int& webserv_sockfd, const char* port_buf);
 std::string get_msg_from_client(int webserv_sockfd);
-void connect_to_web_server(std::string webserv_host, std::string webserv_port,
+bool connect_to_web_server(std::string webserv_host, std::string webserv_port,
     int& webserv_sockfd);
-void proxy_send_data_from_socket(int webserv_sockfd, int new_sockfd);
+void send_webserver_data_to_client(int webserv_sockfd, int new_sockfd);
+void send_connection_error_to_client(int& client_sockfd);
 int send_all(int socket, char *data_buf, int *length);
 void clean_exit(int flag);
 
@@ -87,32 +89,40 @@ int main(int argc, char * argv[]) {
     int webserv_sockfd;
     std::string client_msg, webserv_host, webserv_port, data;
     client_msg = get_msg_from_client(new_sockfd);
-    if(DEBUG_MODE) { printf("client_msg:\n[%s]\n", client_msg.c_str()); }
 
     // get web server host, port, and request or client error message
     if(get_parsed_data(client_msg, webserv_host, webserv_port, data)) {
       // parse successful - send data to web server
-      if(DEBUG_MODE) { printf("web server request:\n%s\n", data.c_str()); }
+      if(DEBUG_MODE) { printf("web server request:\n%s", data.c_str()); }
 
-      connect_to_web_server(webserv_host, webserv_port, webserv_sockfd);
-      if(DEBUG_MODE) { printf("connection to web server successful\n"); }
-
-      int length = data.length();
-      if(DEBUG_MODE) { printf("sending data to web server...\n"); }
-      // send data request to web server
-      if(send_all(webserv_sockfd, (char*)data.c_str(), &length) == -1) {
-        perror("send");
-        printf("send_all only successfully sent %d bytes.\n", length);
-        exit(EXIT_FAILURE);
+      if(connect_to_web_server(webserv_host, webserv_port, webserv_sockfd)) {
+        if(DEBUG_MODE) { printf("connection to web server successful\n"); }
+        // send data request to web server
+        int length = data.length();
+        if(send_all(webserv_sockfd, (char*)data.c_str(), &length) == -1) {
+          perror("send_all");
+          printf("Only sent %d bytes of HTTP request to web server.\n", length);
+          send_connection_error_to_client(new_sockfd);
+          // would be appropriate to exit here in a thread process
+        }
+        else {
+          if(DEBUG_MODE) { printf("sending web server data to client\n"); }
+          send_webserver_data_to_client(webserv_sockfd, new_sockfd);
+        }
       }
-
-      proxy_send_data_from_socket(webserv_sockfd, new_sockfd);
+      else {
+        if(DEBUG_MODE) { printf("connection to web server failed\n"); }
+        send_webserver_data_to_client(webserv_sockfd, new_sockfd);
+      }
     }
     // parse failed, send error message to client
     else {
       if(DEBUG_MODE) { printf("client error: %s\n", data.c_str()); }
       int length = data.length();
-      send_all(new_sockfd, (char*)data.c_str(), &length);
+      if(send_all(new_sockfd, (char*)data.c_str(), &length) == -1) {
+        perror("send_all");
+        printf("Only sent %d bytes of error message to client.\n", length);
+      }
     }
     close(new_sockfd);  // release client
   }
@@ -154,8 +164,7 @@ void create_and_bind_to_socket(int& webserv_sockfd, const char* port_buf) {
   memset(&hints, 0, sizeof hints);
   hints.ai_family = AF_UNSPEC;  // use AF_INET6 to force IPv6
   hints.ai_socktype = SOCK_STREAM;
-  hints.ai_flags = AI_PASSIVE;  // uses current IP address
-                                // (clients expect cs1.seattleu.edu)
+  hints.ai_flags = AI_PASSIVE;  // uses current IP address (cs2.seattleu.edu)
 
   if((rv = getaddrinfo(NULL, port_buf, &hints, &servinfo)) != 0) {
     fprintf(stderr, "getaddrinfo: %s\n", gai_strerror(rv));
@@ -201,7 +210,7 @@ std::string get_msg_from_client(int webserv_sockfd) {
   while(!message_completed) {
     if((numbytes = recv(webserv_sockfd, mssg_buf, BUFFERSIZE-1, 0)) == -1) {
       perror("recv");
-      exit(EXIT_FAILURE);
+      printf("Receiving HTTP request from client\n");
     }
     totalbytes += numbytes;
     strcat(fullmssg_buf,mssg_buf);
@@ -227,7 +236,7 @@ std::string get_msg_from_client(int webserv_sockfd) {
 }
 
 /* Establishes connection to client's requested web server */
-void connect_to_web_server(std::string webserv_host, std::string webserv_port,
+bool connect_to_web_server(std::string webserv_host, std::string webserv_port,
     int& webserv_sockfd) {
   struct addrinfo hints, *servinfo, *p;
   int rv;
@@ -239,56 +248,70 @@ void connect_to_web_server(std::string webserv_host, std::string webserv_port,
   if((rv = getaddrinfo(webserv_host.c_str(), webserv_port.c_str(), &hints,
       &servinfo)) != 0) {
     fprintf(stderr, "getaddrinfo: %s\n", gai_strerror(rv));
-    // TODO: catch error in edge case client misses this
-    exit(EXIT_FAILURE);
+    return false;
   }
 
   // loop through all the results and connect to the first one possible
   for(p = servinfo; p != NULL; p = p->ai_next) {
     if((webserv_sockfd = socket(p->ai_family, p->ai_socktype, p->ai_protocol))
         == -1) {
-      perror("socket");
+      perror("web server socket");
       continue;
     }
     if(connect(webserv_sockfd, p->ai_addr, p->ai_addrlen) == -1) {
-      perror("connect");
+      perror("web server connect");
       close(webserv_sockfd);
       continue;
     }
     break;  // if code reaches this point, connection was made successfully
   }
 
-  freeaddrinfo(servinfo); // free memory
-
   if(p == NULL) {   // p reached NULL with no connection
     fprintf(stderr, "failed to connect\n");
-    exit(EXIT_FAILURE);
+    return false;
   }
+  freeaddrinfo(servinfo); // free memory
+
+  return true;
 }
 
 /* Reads a message from a socket and sends it to a client */
-void proxy_send_data_from_socket(int webserv_sockfd, int new_sockfd) {
+void send_webserver_data_to_client(int webserv_sockfd, int new_sockfd) {
   int numbytes;
   char mssg_buf[BUFFERSIZE];
+  std::string proxy_string;
   bool message_completed = false;
   while(!message_completed) {
     if((numbytes = recv(webserv_sockfd, mssg_buf, BUFFERSIZE-1, 0)) == -1) {
       perror("recv");
-      exit(EXIT_FAILURE);
+      printf("Retrieving data from web server");;
     }
     if(numbytes == 0) {
       message_completed = true;
-      std::string proxy_string = "\n";
-      int proxy_string_length = proxy_string.length();
-      send_all(new_sockfd, (char*)proxy_string.c_str(), &proxy_string_length);
+      proxy_string = "\n";
     }
     else {
       mssg_buf[numbytes] = '\0';
-      std::string proxy_string = mssg_buf;
-      int proxy_string_length = proxy_string.length();
-      send_all(new_sockfd, (char*)proxy_string.c_str(), &proxy_string_length);
+      proxy_string = mssg_buf;
+    }
+    int length = proxy_string.length();
+    if(send_all(new_sockfd, (char*)proxy_string.c_str(), &length) == -1) {
+      perror("send_all");
+      printf("Only sent %d bytes of web server data to client.\n", length);
     }
   }
+}
+
+/* sends a status of 'HTTP/1.0 500 Internal Error' in the case of a failed
+ * connection to the web server */
+void send_connection_error_to_client(int& client_sockfd) {
+  std::string error_msg = "HTTP/1.0 500 Internal error\n";
+  if(INCLUDE_CUSTOM_ERROR_MSGS) {
+    error_msg += "Connection to web server failed.\n";
+  }
+  int length = error_msg.length();
+  send_all(client_sockfd, (char*)error_msg.c_str(), &length);
+  // redundant to error check send_all here as exit will occurr regardless
 }
 
 /* Handles partial sends - based on sample from beej */
