@@ -23,8 +23,8 @@ REFERENCED: Beej's Guide to Network Programming, 8 June 2016,
 CONTENTS
 --------
     1. Purpose and Design Decisions
-    2. Strengths & Weaknesses // TODO
-    3. Contributions          // TODO
+    2. Strengths & Weaknesses
+    3. Contributions
     4. Compiling and Running the Program
 
 1. PURPOSE AND DESIGN DECISIONS
@@ -84,6 +84,9 @@ Notes on Parsing:
 
 - Not multithreaded, only accepts one client at a time
 - Does no filtering of content received from web server
+- High latency incurred if client enters valid web server information with an
+  invalid port number. Should pre-empt closing the client connection after a
+  designated time interval if connection is unsuccessful. // TODO
 
 3. CONTRIBUTIONS
 ----------------

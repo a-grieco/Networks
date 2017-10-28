@@ -37,11 +37,11 @@
 bool port_number_is_valid(int& port_int, int port_number_arg);
 void set_port_number(char* port_buf, int port_int);
 void create_and_bind_to_socket(int& webserv_sockfd, const char* port_buf);
-std::string get_msg_from_client(int webserv_sockfd);
+bool get_msg_from_client(int webserv_sockfd, std::string& client_msg);
 bool connect_to_web_server(std::string webserv_host, std::string webserv_port,
     int& webserv_sockfd);
-void send_webserver_data_to_client(int webserv_sockfd, int new_sockfd);
-void send_connection_error_to_client(int& client_sockfd);
+bool send_webserver_data_to_client(int webserv_sockfd, int new_sockfd);
+void send_error_to_client(int& client_sockfd, std::string& custom_msg);
 int send_all(int socket, char *data_buf, int *length);
 void clean_exit(int flag);
 
@@ -88,43 +88,56 @@ int main(int argc, char * argv[]) {
 
     int webserv_sockfd;
     std::string client_msg, webserv_host, webserv_port, data;
-    client_msg = get_msg_from_client(new_sockfd);
-
-    // get web server host, port, and request or client error message
-    if(get_parsed_data(client_msg, webserv_host, webserv_port, data)) {
-      // parse successful - send data to web server
-      if(DEBUG_MODE) { printf("web server request:\n%s", data.c_str()); }
-
-      if(connect_to_web_server(webserv_host, webserv_port, webserv_sockfd)) {
-        if(DEBUG_MODE) { printf("connection to web server successful\n"); }
-        // send data request to web server
-        int length = data.length();
-        if(send_all(webserv_sockfd, (char*)data.c_str(), &length) == -1) {
-          perror("send_all");
-          printf("Only sent %d bytes of HTTP request to web server.\n", length);
-          send_connection_error_to_client(new_sockfd);
-          // would be appropriate to exit here in a thread process
-        }
-        else {
-          if(DEBUG_MODE) { printf("sending web server data to client\n"); }
-          send_webserver_data_to_client(webserv_sockfd, new_sockfd);
-        }
-      }
-      else {
-        if(DEBUG_MODE) { printf("connection to web server failed\n"); }
-        send_webserver_data_to_client(webserv_sockfd, new_sockfd);
-      }
+    if(!get_msg_from_client(new_sockfd, client_msg)) {
+      std::string custom_msg = "Failed to read HTTP request.";
+      send_error_to_client(new_sockfd, custom_msg);
+      close(new_sockfd);
+      continue;
     }
-    // parse failed, send error message to client
-    else {
-      if(DEBUG_MODE) { printf("client error: %s\n", data.c_str()); }
+
+    // if parse fails, send error message ('data') and close client connection
+    if(!get_parsed_data(client_msg, webserv_host, webserv_port, data)) {
+      if(DEBUG_MODE) { printf("client error message: %s\n", data.c_str()); }
       int length = data.length();
       if(send_all(new_sockfd, (char*)data.c_str(), &length) == -1) {
         perror("send_all");
         printf("Only sent %d bytes of error message to client.\n", length);
       }
+      close(new_sockfd);
+      continue;
     }
-    close(new_sockfd);  // release client
+
+    // parsing successful; generated HTTP request ('data') received
+    if(DEBUG_MODE) { printf("web server request:\n%s", data.c_str()); }
+
+    // connect to web server or send error to and close client connection
+    if(!connect_to_web_server(webserv_host, webserv_port, webserv_sockfd)) {
+      std::string custom_msg = "Connection to web server failed.";
+      send_error_to_client(new_sockfd, custom_msg);
+      close(new_sockfd);
+      continue;
+    }
+
+    // connection to web server successful, send 'data' request to web server
+    int length = data.length();
+    if(send_all(webserv_sockfd, (char*)data.c_str(), &length) == -1) {
+      perror("send_all");
+      printf("Only sent %d bytes of HTTP request to web server.\n", length);
+      std::string custom_msg = "Failed to send HTTP request to web server.";
+      send_error_to_client(new_sockfd, custom_msg);
+      close(new_sockfd);
+      continue;
+    }
+
+    // attempt to retrieve data from webserver and redirect to client
+    if(!send_webserver_data_to_client(webserv_sockfd, new_sockfd)) {
+      std::string custom_msg = "Unable to redirect web server data.";
+      send_error_to_client(new_sockfd, custom_msg);
+      close(new_sockfd);
+      continue;
+    }
+
+    close(new_sockfd);  // release client, transaction successful
   }
 
   signal(SIGTERM, clean_exit);
@@ -196,7 +209,7 @@ void create_and_bind_to_socket(int& webserv_sockfd, const char* port_buf) {
 
 /* Receives HTTP message from client and returns as a string; marks the end of
  * the message with two repeating newlines (4 characters: '\r\n\r\n') */
-std::string get_msg_from_client(int webserv_sockfd) {
+bool get_msg_from_client(int webserv_sockfd, std::string& client_msg) {
   int numbytes = 0, totalbytes = 0;
   char mssg_buf[BUFFERSIZE];
   char fullmssg_buf[MAXDATASIZE];
@@ -211,6 +224,7 @@ std::string get_msg_from_client(int webserv_sockfd) {
     if((numbytes = recv(webserv_sockfd, mssg_buf, BUFFERSIZE-1, 0)) == -1) {
       perror("recv");
       printf("Receiving HTTP request from client\n");
+      return false;
     }
     totalbytes += numbytes;
     strcat(fullmssg_buf,mssg_buf);
@@ -232,7 +246,8 @@ std::string get_msg_from_client(int webserv_sockfd) {
     }
   }
   if(DEBUG_MODE) { printf("...message complete\n"); }
-  return std::string(fullmssg_buf);
+  client_msg = std::string(fullmssg_buf);
+  return true;
 }
 
 /* Establishes connection to client's requested web server */
@@ -276,7 +291,7 @@ bool connect_to_web_server(std::string webserv_host, std::string webserv_port,
 }
 
 /* Reads a message from a socket and sends it to a client */
-void send_webserver_data_to_client(int webserv_sockfd, int new_sockfd) {
+bool send_webserver_data_to_client(int webserv_sockfd, int new_sockfd) {
   int numbytes;
   char mssg_buf[BUFFERSIZE];
   std::string proxy_string;
@@ -284,7 +299,8 @@ void send_webserver_data_to_client(int webserv_sockfd, int new_sockfd) {
   while(!message_completed) {
     if((numbytes = recv(webserv_sockfd, mssg_buf, BUFFERSIZE-1, 0)) == -1) {
       perror("recv");
-      printf("Retrieving data from web server");;
+      printf("Retrieving data from web server");
+      return false;
     }
     if(numbytes == 0) {
       message_completed = true;
@@ -298,20 +314,23 @@ void send_webserver_data_to_client(int webserv_sockfd, int new_sockfd) {
     if(send_all(new_sockfd, (char*)proxy_string.c_str(), &length) == -1) {
       perror("send_all");
       printf("Only sent %d bytes of web server data to client.\n", length);
+      return false;
     }
   }
 }
 
 /* sends a status of 'HTTP/1.0 500 Internal Error' in the case of a failed
  * connection to the web server */
-void send_connection_error_to_client(int& client_sockfd) {
+void send_error_to_client(int& client_sockfd, std::string& custom_msg) {
   std::string error_msg = "HTTP/1.0 500 Internal error\n";
   if(INCLUDE_CUSTOM_ERROR_MSGS) {
-    error_msg += "Connection to web server failed.\n";
+    error_msg += custom_msg + "\n";
   }
   int length = error_msg.length();
-  send_all(client_sockfd, (char*)error_msg.c_str(), &length);
-  // redundant to error check send_all here as exit will occurr regardless
+  if(send_all(client_sockfd, (char*)error_msg.c_str(), &length) == -1) {
+    perror("send_all");
+    printf("Only sent %d bytes of error message to client.\n", length);
+  }
 }
 
 /* Handles partial sends - based on sample from beej */
