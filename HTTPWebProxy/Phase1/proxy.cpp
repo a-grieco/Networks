@@ -20,6 +20,7 @@
 #include <vector>
 #include <sstream>
 #include <iterator>
+#include <sys/time.h> // using wall clock time
 
 #include "parse.h"
 
@@ -80,7 +81,8 @@ int main(int argc, char * argv[]) {
   // accept incomming connections
   while(true) {
     addr_size = sizeof client_addr;
-    new_sockfd = accept(client_sockfd, (struct sockaddr *)&client_addr, &addr_size);
+    new_sockfd = accept(client_sockfd, (struct sockaddr *)&client_addr,
+      &addr_size);
     if(new_sockfd == -1) {
       perror("accept");
       continue;
@@ -255,7 +257,7 @@ bool connect_to_web_server(std::string webserv_host, std::string webserv_port,
     int& webserv_sockfd) {
   struct addrinfo hints, *servinfo, *p;
   int rv;
-
+  printf("in connect_to_web_server\n"); // DELETE ME
   memset(&hints, 0, sizeof hints);
   hints.ai_family = AF_UNSPEC;  // use AF_INET6 to force IPv6
   hints.ai_socktype = SOCK_STREAM;
@@ -265,19 +267,28 @@ bool connect_to_web_server(std::string webserv_host, std::string webserv_port,
     fprintf(stderr, "getaddrinfo: %s\n", gai_strerror(rv));
     return false;
   }
-
+  printf("getaddrinfo successufl\n"); // DELETE ME
+  printf("starting timer...\n");  // DELETE ME
+  struct timeval start, current;
+  double seconds_passed;
+  gettimeofday(&start, NULL);
   // loop through all the results and connect to the first one possible
   for(p = servinfo; p != NULL; p = p->ai_next) {
+    gettimeofday(&current, NULL);
+    seconds_passed = (current.tv_sec - start.tv_sec);
+    printf("in servinfo loop, time: %f seconds\n", seconds_passed); // DELETE ME
     if((webserv_sockfd = socket(p->ai_family, p->ai_socktype, p->ai_protocol))
         == -1) {
       perror("web server socket");
       continue;
     }
+    printf("webserv_sockfd = socket(...) successfull\n"); // DELETE ME
     if(connect(webserv_sockfd, p->ai_addr, p->ai_addrlen) == -1) {
       perror("web server connect");
       close(webserv_sockfd);
       continue;
     }
+    printf("connect(...) successfull\n"); // DELETE ME
     break;  // if code reaches this point, connection was made successfully
   }
 
