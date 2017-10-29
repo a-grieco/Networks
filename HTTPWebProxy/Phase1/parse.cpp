@@ -16,8 +16,8 @@
 
 #include "parse.h"
 
-#define DEBUG_MODE true
-#define INCLUDE_CUSTOM_ERROR_MSGS true  // if false, use only 500 Internal Error
+#define DEBUG_MODE false
+#define INCLUDE_CUSTOM_ERROR_MSGS false // if false, use only 500 Internal Error
 #define PATH_REQUIRED false   // false: uses default "GET / HTTP/1.0" format
                               //        if client message has no defined path
                               // true: client message is declared invalid with

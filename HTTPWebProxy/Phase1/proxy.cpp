@@ -27,9 +27,12 @@
 // TODO: solve invalid port # problem
 // TODO: close client connection after x # of seconds
 
-#define DEBUG_MODE true
-#define INCLUDE_CUSTOM_ERROR_MSGS true  // if false, use only 500 Internal Error
+#define DEBUG_MODE false
+#define INCLUDE_CUSTOM_ERROR_MSGS false // if false, use only 500 Internal Error
 
+#define PREEMPT_EXIT true         // if true, exits if first attempt to connect
+#define MAX_SECONDS_TO_CONNECT 10 // to server exceeds MAX_SECONDS_TO_CONNECT
+                                  // (only activated if port != 80)
 #define DEFAULT_PORT_NUMBER 10042
 #define CONNECTIONS_ALLOWED 1 // will need to change for Phase 2
 #define BUFFERSIZE 10000
@@ -257,7 +260,6 @@ bool connect_to_web_server(std::string webserv_host, std::string webserv_port,
     int& webserv_sockfd) {
   struct addrinfo hints, *servinfo, *p;
   int rv;
-  printf("in connect_to_web_server\n"); // DELETE ME
   memset(&hints, 0, sizeof hints);
   hints.ai_family = AF_UNSPEC;  // use AF_INET6 to force IPv6
   hints.ai_socktype = SOCK_STREAM;
@@ -267,28 +269,31 @@ bool connect_to_web_server(std::string webserv_host, std::string webserv_port,
     fprintf(stderr, "getaddrinfo: %s\n", gai_strerror(rv));
     return false;
   }
-  printf("getaddrinfo successufl\n"); // DELETE ME
-  printf("starting timer...\n");  // DELETE ME
   struct timeval start, current;
   double seconds_passed;
-  gettimeofday(&start, NULL);
+  if(PREEMPT_EXIT && (atoi(webserv_port.c_str()) != 80)) {
+    gettimeofday(&start, NULL);
+  }
   // loop through all the results and connect to the first one possible
   for(p = servinfo; p != NULL; p = p->ai_next) {
-    gettimeofday(&current, NULL);
-    seconds_passed = (current.tv_sec - start.tv_sec);
-    printf("in servinfo loop, time: %f seconds\n", seconds_passed); // DELETE ME
+    if(PREEMPT_EXIT && (atoi(webserv_port.c_str()) != 80)) {
+      gettimeofday(&current, NULL);
+      seconds_passed = (current.tv_sec - start.tv_sec);
+      if(seconds_passed > MAX_SECONDS_TO_CONNECT) {
+        if(DEBUG_MODE) { printf("exited after %f seconds\n", seconds_passed); }
+        return false; // failed to connect within time limit
+      }
+    }
     if((webserv_sockfd = socket(p->ai_family, p->ai_socktype, p->ai_protocol))
         == -1) {
       perror("web server socket");
       continue;
     }
-    printf("webserv_sockfd = socket(...) successfull\n"); // DELETE ME
     if(connect(webserv_sockfd, p->ai_addr, p->ai_addrlen) == -1) {
       perror("web server connect");
       close(webserv_sockfd);
       continue;
     }
-    printf("connect(...) successfull\n"); // DELETE ME
     break;  // if code reaches this point, connection was made successfully
   }
 

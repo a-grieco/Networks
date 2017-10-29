@@ -7,7 +7,6 @@ AUTHORs:  Madeline Wong
 DATE:  10/29/2017
 INCLUDED: parse.h
           parse.cpp
-          proxy.h // TODO
           proxy.cpp
           Makefile
           README
@@ -60,6 +59,11 @@ Client Request: A request line optionally followed by as many headers as desired
     Additional line(s): 'name: value'
 
 Notes on Parsing:
+    get_parsed_data: the only function that needs to be called from parse.cpp in
+      proxy.cpp. If the client HTTP request is valid (with a valid host), the
+      function returns TRUE, assigns the 'host' and 'port', and 'data' will
+      contain the web server request. If the parse is unsuccessful, the function
+      returns FALSE and 'data' will contain a client error message.
     Request line from client:
       - Only 'GET' method and 'HTTP/1.0' version accepted.
       - Absolute URI requires 'http://' URL prefix
@@ -84,9 +88,16 @@ Notes on Parsing:
 
 - Not multithreaded, only accepts one client at a time
 - Does no filtering of content received from web server
-- High latency incurred if client enters valid web server information with an
-  invalid port number. Should pre-empt closing the client connection after a
-  designated time interval if connection is unsuccessful. // TODO
+
+- High latency is incurred if a client enters valid web server information with
+  an invalid port number. The delay occurs after the socket descriptor is built
+  for the webserver when the proxy attempts to connect. The connect() function
+  waits until the connection times out, then tries the next result in servinfo.
+  However, the wait for each connection timeout can be minutes long.
++ To reduce latency, a PREEMPT_EXIT flag was created. When set to TRUE, and the
+  port number given by the client isn't the standard '80', the proxy will stop
+  attempting to make a connection if the first attempt takes more than
+  MAX_SECONDS_TO_CONNECT (configurable).
 
 3. CONTRIBUTIONS
 ----------------
@@ -111,12 +122,12 @@ Note: Port number must be between 10000 and 13000 (inclusive)
 After the proxy is running, in a new console (now on the client side) telnet
 into the proxy by typing:
     telnet <hostname> <port>
-    example: telnet localhost 10042
+    example:  telnet localhost 10042
 
 Send the proxy an HTTP request from the client telnet connection.
     example:  GET http://www.yahoo.com/index.html HTTP/1.0
 
 On the client side, a response should be received from the proxy that either
 contains an error status line of 'HTTP/1.0 500 Internal Error' (directly from
-the proxy) or a response from the web server containing a status line and
-requested data.
+the proxy) or a response from the web server containing a status line and any
+resulting data.
