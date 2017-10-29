@@ -29,24 +29,25 @@ CONTENTS
 1. PURPOSE AND DESIGN DECISIONS
 -------------------------------
 This proxy is designed to intercept HTTP requests from clients, parse and verify
-those requests, and (if valid) send requests to the client's desired web server,
-return the web server's response to the client, and then close the connection
-with the client. Upon receiving an invalid client request, the proxy will reply
-to the client with a status line indicating that an internal error occurred.
+those requests, and (if valid) send requests to the client's desired web server
+amd then return the web server's response to the client. Upon receiving an
+invalid client request, the proxy will reply to the client with a status line
+indicating that an internal error occurred.
 
 CLIENT:
-Connection: Will use telnet to connect to the proxy
+Connection: Use telnet to connect to the proxy
 Arguments:  Request line, optionally followed by as many headers as desired
-  Request line: HTTP method to be used, only 'GET' accepted
+  Request line: <METHOD> <URL> <HTTP VERSION>
+                HTTP method, only 'GET' accepted
                 Absolute URI**, formatted as 'http://host[:port]/path'
-                HTTP version to be used, only 'HTTP/1.0' accepted
+                HTTP version, only 'HTTP/1.0' accepted
     **  URL 'http://' prefix required
         Port number will default to '80' if not included
         Proxy is configurable to either require a path or not (see below).
-  Header line(s): Formatted as 'name: value' (one header per line)
+  Header line(s): <HEADER NAME>: <HEADER VALUE> (one header per line)
                   Name cannot have embedded spaces (i.e. 'Content-type' ok, but
                   'Content type' results in an error)
-                  Header must contain a value after the ':'
+                  Header must contain a value
   Max size:  Size of HTTP request is limited to 100,000 characters
 
 PROXY:
@@ -54,16 +55,16 @@ Port Number:  Defaults to 10042 unless specified by user.
               A Port Number defined by the user must be between 10000 and
               13000 (inclusive) or it will be rejected.
 Number Connections:  Only one client connection allowed at a time (Phase 1)
-Client Request: A request line optionally followed by as many headers as desired
-    First line: 'GET http://host[:port]/path HTTP/1.0'
-    Additional line(s): 'name: value'
+Client Request: A request line optionally followed by one or more headers
+    Request line:   'GET http://host[:port]/path HTTP/1.0'
+    Header line(s): 'name: value'
 
 Notes on Parsing:
-    get_parsed_data: the only function that needs to be called from parse.cpp in
-      proxy.cpp. If the client HTTP request is valid (with a valid host), the
-      function returns TRUE, assigns the 'host' and 'port', and 'data' will
-      contain the web server request. If the parse is unsuccessful, the function
-      returns FALSE and 'data' will contain a client error message.
+    get_parsed_data: the only function called from parse.cpp in proxy.cpp. If
+      the client HTTP request is valid (and has a valid host), the function
+      returns TRUE, assigns the 'host' and 'port', and 'data' contains the web
+      server request. If the parse is unsuccessful, the function returns FALSE
+      and 'data' contains a client error message.
     Request line from client:
       - Only 'GET' method and 'HTTP/1.0' version accepted.
       - Absolute URI requires 'http://' URL prefix
@@ -81,10 +82,10 @@ Notes on Parsing:
 
 2. STRENGTHS AND WEAKNESSES
 ---------------------------
-+ Checks DNS for valid host name before attempting a connection.
++ Checks DNS for valid host name before attempting a connection
 + Handles partial sends and receives (all loops)
 + Parsing is robust (corrects minor inconsistencies like case and/or spacing)
-  and configurable to allow absence of absolute path
+  and configurable to allow default '/' in place of absolute path
 
 - Not multithreaded, only accepts one client at a time
 - Does no filtering of content received from web server
