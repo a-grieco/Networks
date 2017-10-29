@@ -30,13 +30,14 @@ CONTENTS
 -------------------------------
 This proxy is designed to intercept HTTP requests from clients, parse and verify
 those requests, and (if valid) send requests to the client's desired web server
-amd then return the web server's response to the client. Upon receiving an
+and then return the web server's response to the client. Upon receiving an
 invalid client request, the proxy will reply to the client with a status line
 indicating that an internal error occurred.
 
 CLIENT:
 Connection: Use telnet to connect to the proxy
 Arguments:  Request line, optionally followed by as many headers as desired
+            Press enter (carriage return) twice to submit request to proxy
   Request line: <METHOD> <URL> <HTTP VERSION>
                 METHOD: only 'GET' accepted
                 URL:  Absolute URI formatted as 'http://host[:port]/path'
