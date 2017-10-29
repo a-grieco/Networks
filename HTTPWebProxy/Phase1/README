@@ -38,27 +38,24 @@ CLIENT:
 Connection: Use telnet to connect to the proxy
 Arguments:  Request line, optionally followed by as many headers as desired
   Request line: <METHOD> <URL> <HTTP VERSION>
-                HTTP method, only 'GET' accepted
-                Absolute URI**, formatted as 'http://host[:port]/path'
-                HTTP version, only 'HTTP/1.0' accepted
-    **  URL 'http://' prefix required
-        Port number will default to '80' if not included
-        Proxy is configurable to either require a path or not (see below).
+                METHOD: only 'GET' accepted
+                URL:  Absolute URI formatted as 'http://host[:port]/path'
+                      Prefix 'http://' required, does not permit 'https://' etc.
+                      Port number defaults to '80' if omitted
+                      Proxy configurable to require a path or not (see proxy)
+                HTTP VERSION: only 'HTTP/1.0' accepted
   Header line(s): <HEADER NAME>: <HEADER VALUE> (one header per line)
-                  Name cannot have embedded spaces (i.e. 'Content-type' ok, but
-                  'Content type' results in an error)
-                  Header must contain a value
-  Max size:  Size of HTTP request is limited to 100,000 characters
+                  HEADER NAME cannot have embedded spaces (i.e. 'Content-type'
+                  is ok, but 'Content type' results in an error)
+                  Header must contain a HEADER VALUE (cannot be whitespace)
+  Max size:  Total size of HTTP request is limited to 100,000 characters
 
 PROXY:
-Port Number:  Defaults to 10042 unless specified by user.
-              A Port Number defined by the user must be between 10000 and
-              13000 (inclusive) or it will be rejected.
+Port Number:  Must be between 10000 and 13000 (inclusive) or it will be rejected
 Number Connections:  Only one client connection allowed at a time (Phase 1)
 Client Request: A request line optionally followed by one or more headers
     Request line:   'GET http://host[:port]/path HTTP/1.0'
     Header line(s): 'name: value'
-
 Notes on Parsing:
     get_parsed_data: the only function called from parse.cpp in proxy.cpp. If
       the client HTTP request is valid (and has a valid host), the function
