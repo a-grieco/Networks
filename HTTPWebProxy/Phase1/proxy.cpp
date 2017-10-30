@@ -28,7 +28,8 @@
 // TODO: close client connection after x # of seconds
 
 #define DEBUG_MODE false
-#define INCLUDE_CUSTOM_ERROR_MSGS false // if false, use only 500 Internal Error
+#define INCLUDE_CUSTOM_ERROR_MSGS true // if false, use only 500 Internal Error
+                                       // if true, includes error detail
 
 #define PREEMPT_EXIT true         // if true, exits if first attempt to connect
 #define MAX_SECONDS_TO_CONNECT 10 // to server exceeds MAX_SECONDS_TO_CONNECT
@@ -79,7 +80,7 @@ int main(int argc, char * argv[]) {
     perror("listen");
     exit(EXIT_FAILURE);
   };
-  printf("Proxy listening for connections...\n");
+  if(DEBUG_MODE) { printf("Proxy listening for connections...\n"); }
 
   // accept incomming connections
   while(true) {
@@ -94,7 +95,8 @@ int main(int argc, char * argv[]) {
     int webserv_sockfd;
     std::string client_msg, webserv_host, webserv_port, data;
     if(!get_msg_from_client(new_sockfd, client_msg)) {
-      std::string custom_msg = "Failed to read HTTP request.";
+      std::string custom_msg = "Failed to read HTTP request. "
+                               "Please try again.\n";
       send_error_to_client(new_sockfd, custom_msg);
       close(new_sockfd);
       continue;
@@ -103,11 +105,7 @@ int main(int argc, char * argv[]) {
     // if parse fails, send error message ('data') and close client connection
     if(!get_parsed_data(client_msg, webserv_host, webserv_port, data)) {
       if(DEBUG_MODE) { printf("client error message: %s\n", data.c_str()); }
-      int length = data.length();
-      if(send_all(new_sockfd, (char*)data.c_str(), &length) == -1) {
-        perror("send_all");
-        printf("Only sent %d bytes of error message to client.\n", length);
-      }
+      send_error_to_client(new_sockfd, data);
       close(new_sockfd);
       continue;
     }
@@ -117,7 +115,7 @@ int main(int argc, char * argv[]) {
 
     // connect to web server or send error to and close client connection
     if(!connect_to_web_server(webserv_host, webserv_port, webserv_sockfd)) {
-      std::string custom_msg = "Connection to web server failed.";
+      std::string custom_msg = "Connection to web server failed.\n";
       send_error_to_client(new_sockfd, custom_msg);
       close(new_sockfd);
       continue;
@@ -128,7 +126,8 @@ int main(int argc, char * argv[]) {
     if(send_all(webserv_sockfd, (char*)data.c_str(), &length) == -1) {
       perror("send_all");
       printf("Only sent %d bytes of HTTP request to web server.\n", length);
-      std::string custom_msg = "Failed to send HTTP request to web server.";
+      std::string custom_msg = "Failed to send HTTP request to web server. "
+                               "Please retry request.\n";
       send_error_to_client(new_sockfd, custom_msg);
       close(new_sockfd);
       continue;
@@ -136,7 +135,8 @@ int main(int argc, char * argv[]) {
 
     // attempt to retrieve data from webserver and redirect to client
     if(!send_webserver_data_to_client(webserv_sockfd, new_sockfd)) {
-      std::string custom_msg = "Unable to redirect web server data.";
+      std::string custom_msg = "Unable to redirect web server data. "
+                               "Please retry request.\n";
       send_error_to_client(new_sockfd, custom_msg);
       close(new_sockfd);
       continue;
@@ -191,7 +191,8 @@ void create_and_bind_to_socket(int& webserv_sockfd, const char* port_buf) {
 
   // loop through all the results and connect to the first one possible
   for(p = servinfo; p != NULL; p = p->ai_next) {
-    if((webserv_sockfd = socket(p->ai_family, p->ai_socktype, p->ai_protocol)) == -1) {
+    if((webserv_sockfd = socket(p->ai_family, p->ai_socktype, p->ai_protocol))
+        == -1) {
       perror("socket");
       continue;
     }
@@ -340,8 +341,9 @@ bool send_webserver_data_to_client(int webserv_sockfd, int new_sockfd) {
 void send_error_to_client(int& client_sockfd, std::string& custom_msg) {
   std::string error_msg = "HTTP/1.0 500 Internal error\n";
   if(INCLUDE_CUSTOM_ERROR_MSGS) {
-    error_msg += custom_msg + "\n";
+    error_msg += custom_msg;
   }
+  error_msg += "\n";
   int length = error_msg.length();
   if(send_all(client_sockfd, (char*)error_msg.c_str(), &length) == -1) {
     perror("send_all");

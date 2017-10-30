@@ -17,7 +17,6 @@
 #include "parse.h"
 
 #define DEBUG_MODE false
-#define INCLUDE_CUSTOM_ERROR_MSGS false // if false, use only 500 Internal Error
 #define PATH_REQUIRED false   // false: uses default "GET / HTTP/1.0" format
                               //        if client message has no defined path
                               // true: client message is declared invalid with
@@ -26,7 +25,6 @@
 #define VALID_METHOD "GET"
 #define VALID_HTTP_VERS "HTTP/1.0"
 #define VALID_URL_PROTOCOL_PREFIX "http:"
-#define INTERNAL_ERROR "500"
 
 // NOTE: get_parsed_data should be the only function the proxy needs to call
 
@@ -85,18 +83,8 @@ void generate_webserver_request(std::string& data, std::string& host,
   data = webserv_req;
 }
 
-/* generates a status line for the client with HTTP version: HTTP/1.0, response
- * status code: 500, and reason phrase: 'Internal Error'
- * Note: in DEBUG_MODE, more precise cause of error is included */
+/* generates a detail for the precise cause of the error */
 void generate_client_error_msg(std::string& data, std::vector<Error>& errnos) {
-  std::string http_vers = VALID_HTTP_VERS, internal_errno = INTERNAL_ERROR;
-  data = http_vers + " " + internal_errno + " Internal Error\n";
-
-  if(INCLUDE_CUSTOM_ERROR_MSGS) { include_error_detail(data, errnos); }
-}
-
-/* adds additional information to client error message for debugging purposes */
-void include_error_detail(std::string& data, std::vector<Error>& errnos) {
   for(std::vector<Error>::iterator it = errnos.begin(); it != errnos.end();
       ++it) {
     switch(*it) {
@@ -131,14 +119,14 @@ void include_error_detail(std::string& data, std::vector<Error>& errnos) {
         data += "Invalid port number, must be numeric\n";
         break;
       case e_headers:
-        data += "Invalid formatting of header(s): should be [name: value]\n";
+        data += "Invalid formatting of header(s). Expected <NAME>: <VALUE>\n";
         break;
       case e_name_ws:
         data += "Header name may not contain embedded whitespace,\n"
-                "i.e. 'Content-type' ok, 'Content type' results in error";
+                "i.e. 'Content-type' ok, 'Content type' results in error\n";
         break;
       case e_header_val:
-        data += "Header missing value. Expected format is [name: value]\n";
+        data += "Header missing value. Expected <NAME>: <VALUE>\n";
         break;
     }
   }

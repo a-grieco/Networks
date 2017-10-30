@@ -13,7 +13,6 @@ bool get_parsed_data(std::string client_msg, std::string& webserv_host,
 void generate_webserver_request(std::string& data, std::string& host,
   std::string& path, std::string& port, std::vector<std::string>& headers);
 void generate_client_error_msg(std::string& data, std::vector<Error>& errnos);
-void include_error_detail(std::string& data, std::vector<Error>& errnos);
 
 bool parse_client_msg(std::string msg, std::string& host, std::string& path,
   std::string& port, std::vector<std::string>& headers,
