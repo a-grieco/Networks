@@ -30,7 +30,7 @@
 
 /* accepts a client message, assigns a valid web server request to 'data', and
  * returns true if the client message is valid; otherwise, assigns appropriate
- * (500) error message to 'data' and returns false */
+ * detailed error message to 'data' and returns false */
 bool get_parsed_data(std::string client_msg, std::string& webserv_host,
   std::string& webserv_port, std::string& data) {
 

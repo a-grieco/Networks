@@ -24,9 +24,6 @@
 
 #include "parse.h"
 
-// TODO: solve invalid port # problem
-// TODO: close client connection after x # of seconds
-
 #define DEBUG_MODE false
 #define INCLUDE_CUSTOM_ERROR_MSGS false // if false, use only 500 Internal Error
                                         // if true, include error detail
