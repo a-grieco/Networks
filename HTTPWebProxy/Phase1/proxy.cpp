@@ -28,8 +28,8 @@
 // TODO: close client connection after x # of seconds
 
 #define DEBUG_MODE false
-#define INCLUDE_CUSTOM_ERROR_MSGS true // if false, use only 500 Internal Error
-                                       // if true, includes error detail
+#define INCLUDE_CUSTOM_ERROR_MSGS false // if false, use only 500 Internal Error
+                                        // if true, include error detail
 
 #define PREEMPT_EXIT true         // if true, exits if first attempt to connect
 #define MAX_SECONDS_TO_CONNECT 10 // to server exceeds MAX_SECONDS_TO_CONNECT

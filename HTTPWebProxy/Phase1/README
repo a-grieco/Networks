@@ -34,9 +34,10 @@ and then return the web server's response to the client. Upon receiving an
 invalid client request, the proxy will reply to the client with a status line
 indicating that an internal error occurred.
 
-If INCLUDE_CUSTOM_ERROR_MSGS is set to true (default), a message indicating the cause
-of the error will be included in the internal error status line. If set to false, only
-the status line, 'HTTP/1.0 500 Internal error', will appear to the client.
+If INCLUDE_CUSTOM_ERROR_MSGS is set to true, a message indicating the cause of
+of an error in the proxy will be included in the internal error status line. If
+set to false, only the status line, 'HTTP/1.0 500 Internal error', will appear
+to the client if an error in the proxy occurs.
 
 CLIENT:
 Connection: Use telnet to connect to the proxy
@@ -56,7 +57,7 @@ Arguments:  Request line, optionally followed by as many headers as desired
   Max size:  Total size of HTTP request is limited to 100,000 characters
 
 PROXY:
-Port Number:  Must be between 10000 and 13000 (inclusive) or it will be rejected
+Port Number: Must be between 10000 and 13000 (inclusive) or it will be rejected
 Number Connections:  Only one client connection allowed at a time (Phase 1)
 Client Request: A request line optionally followed by one or more headers
     Request line:   'GET http://host[:port]/path HTTP/1.0'
