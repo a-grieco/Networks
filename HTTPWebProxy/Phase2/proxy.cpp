@@ -5,7 +5,7 @@
 
 // proxy receives data requests from client and uses HTTP to retrieve and
 // forward data from a given web server back to the client
-
+#include <pthread.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <unistd.h>
@@ -24,8 +24,8 @@
 
 #include "parse.h"
 
-#define DEBUG_MODE false
-#define INCLUDE_CUSTOM_ERROR_MSGS false // if false, use only 500 Internal Error
+#define DEBUG_MODE true
+#define INCLUDE_CUSTOM_ERROR_MSGS true // if false, use only 500 Internal Error
                                         // if true, include error detail
 
 #define PREEMPT_EXIT true         // if true, exits if first attempt to connect
@@ -46,6 +46,7 @@ bool send_webserver_data_to_client(int webserv_sockfd, int new_sockfd);
 void send_error_to_client(int& client_sockfd, std::string& custom_msg);
 int send_all(int socket, char *data_buf, int *length);
 void clean_exit(int flag);
+void* threaded_connection (void * new_sockfd_ptr);
 
 int main(int argc, char * argv[]) {
 
@@ -65,10 +66,7 @@ int main(int argc, char * argv[]) {
   set_port_number(port_buf, port_int);
 
   // get data from client
-  int client_sockfd, new_sockfd;
-  struct sockaddr_storage client_addr;
-  struct sigaction sa;
-  socklen_t addr_size;
+  int client_sockfd;
 
   create_and_bind_to_socket(client_sockfd, port_buf);
 
@@ -79,9 +77,15 @@ int main(int argc, char * argv[]) {
   };
   if(DEBUG_MODE) { printf("Proxy listening for connections...\n"); }
 
-  // accept incomming connections
+  // accept incoming connections
   while(true) {
+    int new_sockfd;
+    struct sockaddr_storage client_addr;
+    struct sigaction sa;
+    socklen_t addr_size;
     addr_size = sizeof client_addr;
+    //unsigned int usecs = (unsigned int)5000000;
+    //usleep(usecs);
     new_sockfd = accept(client_sockfd, (struct sockaddr *)&client_addr,
       &addr_size);
     if(new_sockfd == -1) {
@@ -89,63 +93,74 @@ int main(int argc, char * argv[]) {
       continue;
     }
 
-    int webserv_sockfd;
-    std::string client_msg, webserv_host, webserv_port, data;
-    if(!get_msg_from_client(new_sockfd, client_msg)) {
-      std::string custom_msg = "Failed to read HTTP request. "
-                               "Please try again.\n";
-      send_error_to_client(new_sockfd, custom_msg);
-      close(new_sockfd);
-      continue;
-    }
+    pthread_t thread;
+    //pthread_detach(thread);
+    if(DEBUG_MODE) { printf("Creating thread...\n"); }
+    pthread_create(&thread, NULL, threaded_connection, &new_sockfd);
 
-    // if parse fails, send error message ('data') and close client connection
-    if(!get_parsed_data(client_msg, webserv_host, webserv_port, data)) {
-      if(DEBUG_MODE) { printf("client error message: %s\n", data.c_str()); }
-      send_error_to_client(new_sockfd, data);
-      close(new_sockfd);
-      continue;
-    }
-
-    // parsing successful; generated HTTP request ('data') received
-    if(DEBUG_MODE) { printf("web server request:\n%s", data.c_str()); }
-
-    // connect to web server or send error to and close client connection
-    if(!connect_to_web_server(webserv_host, webserv_port, webserv_sockfd)) {
-      std::string custom_msg = "Connection to web server failed.\n";
-      send_error_to_client(new_sockfd, custom_msg);
-      close(new_sockfd);
-      continue;
-    }
-
-    // connection to web server successful, send 'data' request to web server
-    int length = data.length();
-    if(send_all(webserv_sockfd, (char*)data.c_str(), &length) == -1) {
-      perror("send_all");
-      printf("Only sent %d bytes of HTTP request to web server.\n", length);
-      std::string custom_msg = "Failed to send HTTP request to web server. "
-                               "Please retry request.\n";
-      send_error_to_client(new_sockfd, custom_msg);
-      close(new_sockfd);
-      continue;
-    }
-
-    // attempt to retrieve data from webserver and redirect to client
-    if(!send_webserver_data_to_client(webserv_sockfd, new_sockfd)) {
-      std::string custom_msg = "Unable to redirect web server data. "
-                               "Please retry request.\n";
-      send_error_to_client(new_sockfd, custom_msg);
-      close(new_sockfd);
-      continue;
-    }
-
-    close(new_sockfd);  // release client, transaction successful
   }
 
   signal(SIGTERM, clean_exit);
   signal(SIGINT, clean_exit);
 
   return 0;
+}
+
+
+void* threaded_connection (void * new_sockfd_ptr) { 
+  int new_sockfd = *((int*) new_sockfd_ptr);
+  int webserv_sockfd;
+  if(DEBUG_MODE) { printf("thread created...\n"); }
+  std::string client_msg, webserv_host, webserv_port, data;
+  if(!get_msg_from_client(new_sockfd, client_msg)) {
+    std::string custom_msg = "Failed to read HTTP request. "
+                             "Please try again.\n";
+    send_error_to_client(new_sockfd, custom_msg);
+    close(new_sockfd);
+    pthread_exit(NULL);
+  }
+
+  // if parse fails, send error message ('data') and close client connection
+  if(!get_parsed_data(client_msg, webserv_host, webserv_port, data)) {
+    if(DEBUG_MODE) { printf("client error message: %s\n", data.c_str()); }
+    send_error_to_client(new_sockfd, data);
+    close(new_sockfd);
+    pthread_exit(NULL);
+  }
+
+  // parsing successful; generated HTTP request ('data') received
+  if(DEBUG_MODE) { printf("web server request:\n%s", data.c_str()); }
+
+  // connect to web server or send error to and close client connection
+  if(!connect_to_web_server(webserv_host, webserv_port, webserv_sockfd)) {
+    std::string custom_msg = "Connection to web server failed.\n";
+    send_error_to_client(new_sockfd, custom_msg);
+    close(new_sockfd);
+    pthread_exit(NULL);
+  }
+
+  // connection to web server successful, send 'data' request to web server
+  int length = data.length();
+  if(send_all(webserv_sockfd, (char*)data.c_str(), &length) == -1) {
+    perror("send_all");
+    printf("Only sent %d bytes of HTTP request to web server.\n", length);
+    std::string custom_msg = "Failed to send HTTP request to web server. "
+                             "Please retry request.\n";
+    send_error_to_client(new_sockfd, custom_msg);
+    close(new_sockfd);
+    pthread_exit(NULL);
+  }
+
+  // attempt to retrieve data from webserver and redirect to client
+  if(!send_webserver_data_to_client(webserv_sockfd, new_sockfd)) {
+    std::string custom_msg = "Unable to redirect web server data. "
+                             "Please retry request.\n";
+    send_error_to_client(new_sockfd, custom_msg);
+    close(new_sockfd);
+    pthread_exit(NULL);
+  }
+
+  close(new_sockfd);  // release client, transaction successful
 }
 
 /* Assigns user specified port number and returns true if argument valid, i.e.
@@ -331,6 +346,7 @@ bool send_webserver_data_to_client(int webserv_sockfd, int new_sockfd) {
       return false;
     }
   }
+  return message_completed;
 }
 
 /* sends a status of 'HTTP/1.0 500 Internal Error' in the case of a failed
