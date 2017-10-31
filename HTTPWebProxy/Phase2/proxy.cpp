@@ -77,6 +77,10 @@ int main(int argc, char * argv[]) {
   };
   if(DEBUG_MODE) { printf("Proxy listening for connections...\n"); }
 
+
+  pthread_attr_t attr;
+  pthread_attr_init(&attr);
+  pthread_attr_setdetachstate(&attr,PTHREAD_CREATE_DETACHED);
   // accept incoming connections
   while(true) {
     int new_sockfd;
@@ -92,14 +96,13 @@ int main(int argc, char * argv[]) {
       perror("accept");
       continue;
     }
-
     pthread_t thread;
     //pthread_detach(thread);
     if(DEBUG_MODE) { printf("Creating thread...\n"); }
-    pthread_create(&thread, NULL, threaded_connection, &new_sockfd);
+    pthread_create(&thread, &attr, threaded_connection, &new_sockfd);
 
   }
-
+  pthread_attr_destroy(&attr);
   signal(SIGTERM, clean_exit);
   signal(SIGINT, clean_exit);
 
