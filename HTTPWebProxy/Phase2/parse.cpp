@@ -16,15 +16,17 @@
 
 #include "parse.h"
 
-#define DEBUG_MODE true
-#define PATH_REQUIRED false   // false: uses default "GET / HTTP/1.0" format
-                              //        if client message has no defined path
-                              // true: client message is declared invalid with
-                              //       no path defined
-#define DEFAULT_PORT "80"
-#define VALID_METHOD "GET"
-#define VALID_HTTP_VERS "HTTP/1.0"
-#define VALID_URL_PROTOCOL_PREFIX "http:"
+const bool DEBUG_MODE = true;
+const bool INCLUDE_PARSING_ERROR_MSGS = true;
+
+const bool PATH_REQUIRED = false; // false: uses default "GET / HTTP/1.0" format
+                                  //       if client message has no defined path
+                                  // true: client message is declared invalid
+                                  //       if no path is defined
+const std::string DEFAULT_PORT = "80";
+const std::string VALID_METHOD = "GET";
+const std::string VALID_HTTP_VERS = "HTTP/1.0";
+const std::string VALID_URL_PROTOCOL_PREFIX = "http:";
 
 // NOTE: get_parsed_data should be the only function the proxy needs to call
 
@@ -36,9 +38,10 @@ bool get_parsed_data(std::string client_msg, std::string& webserv_host,
 
   std::string host, path, port;
   std::vector<std::string> headers;
-  std::vector<Error> errnos;
+  Error err;
+
   // if parse successful, generate web server request and return true
-  if(parse_client_msg(client_msg, host, path, port, headers, errnos)) {
+  if(parse_client_msg(client_msg, host, path, port, headers, err)) {
     webserv_host = host;
     webserv_port = port;
     if(DEBUG_MODE) {
@@ -56,7 +59,7 @@ bool get_parsed_data(std::string client_msg, std::string& webserv_host,
 
   // otherwise, generate error message and return false
   if(DEBUG_MODE) { printf("in <parse.cpp> parse_client_msg detected error\n"); }
-  generate_client_error_msg(data, errnos);
+  if(INCLUDE_PARSING_ERROR_MSGS) { generate_client_error_msg(data, err); }
   return false;
 }
 
@@ -84,51 +87,48 @@ void generate_webserver_request(std::string& data, std::string& host,
 }
 
 /* generates a detail for the precise cause of the error */
-void generate_client_error_msg(std::string& data, std::vector<Error>& errnos) {
-  for(std::vector<Error>::iterator it = errnos.begin(); it != errnos.end();
-      ++it) {
-    switch(*it) {
-      case e_req_line:
-        data += "Invalid request line: expecting <METHOD> <URL> <HTTP VERSION>"
-                "\ni.e. 'GET http://hostname[:port]/path HTTP/1.0'\n";
-        break;
-      case e_method:
-        data += "Invalid HTTP method: only GET accepted\n";
-        break;
-      case e_url:
-        data += "Invalid URL: must use absolute URI formatted as "
-                "http://hostname[:port]/path\n";
-        break;
-      case e_http_vers:
-        data += "Invalid HTTP version: only HTTP/1.0 accepted\n";
-        break;
-      case e_http_prefix:
-        data += "Invalid protocol prefix in URL: only 'http://' accepted\n";
-        break;
-      case e_host:
-        data += "Missing host\n";
-        break;
-      case e_dns:
-        data += "Failed to resolve the hostname with DNS\n";
-        break;
-      case e_path:
-        data += "Missing path: absolute URI required\n"
-                "i.e. http://hostname[:port]/path\n";
-        break;
-      case e_port:
-        data += "Invalid port number, must be numeric\n";
-        break;
-      case e_headers:
-        data += "Invalid formatting of header(s). Expected <NAME>: <VALUE>\n";
-        break;
-      case e_name_ws:
-        data += "Header name may not contain embedded whitespace,\n"
-                "i.e. 'Content-type' ok, 'Content type' results in error\n";
-        break;
-      case e_header_val:
-        data += "Header missing value. Expected <NAME>: <VALUE>\n";
-        break;
-    }
+void generate_client_error_msg(std::string& data, Error& err) {
+  switch(err) {
+    case e_req_line:
+      data += "Invalid request line: expecting <METHOD> <URL> <HTTP VERSION>"
+              "\ni.e. 'GET http://hostname[:port]/path HTTP/1.0'\n";
+      break;
+    case e_method:
+      data += "Invalid HTTP method: only GET accepted\n";
+      break;
+    case e_url:
+      data += "Invalid URL: must use absolute URI formatted as "
+              "http://hostname[:port]/path\n";
+      break;
+    case e_http_vers:
+      data += "Invalid HTTP version: only HTTP/1.0 accepted\n";
+      break;
+    case e_http_prefix:
+      data += "Invalid protocol prefix in URL: only 'http://' accepted\n";
+      break;
+    case e_host:
+      data += "Missing host\n";
+      break;
+    case e_dns:
+      data += "Failed to resolve the hostname with DNS\n";
+      break;
+    case e_path:
+      data += "Missing path: absolute URI required\n"
+              "i.e. http://hostname[:port]/path\n";
+      break;
+    case e_port:
+      data += "Invalid port number, must be numeric\n";
+      break;
+    case e_headers:
+      data += "Invalid formatting of header(s). Expected <NAME>: <VALUE>\n";
+      break;
+    case e_name_ws:
+      data += "Header name may not contain embedded whitespace,\n"
+              "i.e. 'Content-type' ok, 'Content type' results in error\n";
+      break;
+    case e_header_val:
+      data += "Header missing value. Expected <NAME>: <VALUE>\n";
+      break;
   }
 }
 
@@ -137,8 +137,7 @@ void generate_client_error_msg(std::string& data, std::vector<Error>& errnos) {
 /* extracts web server host, path, and port number and headers (if present) from
  * the client message and returns true if successful; otherwise returns false */
 bool parse_client_msg(std::string msg, std::string& host, std::string& path,
-    std::string& port, std::vector<std::string>& headers,
-    std::vector<Error>& errnos) {
+    std::string& port, std::vector<std::string>& headers, Error& err) {
 
   // get first line of client request
   std::string delimiter = "\r\n";
@@ -146,10 +145,10 @@ bool parse_client_msg(std::string msg, std::string& host, std::string& path,
   std::string req = msg.substr(0, pos);
   msg.erase(0, pos + delimiter.size());
 
-  if(parse_request_line(req, host, path, port, errnos)) {
+  if(parse_request_line(req, host, path, port, err)) {
     // extract headers if present
     if(msg.size() > 0) {
-      return(parse_headers(msg, headers, errnos));
+      return(parse_headers(msg, headers, err));
     }
     return true;  // client request line valid
   }
@@ -159,21 +158,21 @@ bool parse_client_msg(std::string msg, std::string& host, std::string& path,
 /* parses client request line into host, path, and port number and returns true;
  * otherwise, returns false for invalid formatting and/or bad DNS */
 bool parse_request_line(std::string req, std::string& host, std::string& path,
-    std::string &port, std::vector<Error>& errnos) {
+    std::string &port, Error& err) {
 
   // client request line should contain 3 parts: <METHOD> <URL> <HTTP VERSION>
   std::string method, url, http_vers;
 
-  if(extract_request_elements(req, method, url, http_vers, errnos)) {
+  if(extract_request_elements(req, method, url, http_vers, err)) {
     if(!verify_method(method)) {
-      errnos.push_back(e_method);
+      err = e_method;
       return false;
     }
     if(!verify_http_vers(http_vers)) {
-      errnos.push_back(e_http_vers);
+      err = e_http_vers;
       return false;
     }
-    if(!parse_url(url, host, path, port, errnos)) {
+    if(!parse_url(url, host, path, port, err)) {
       return false;
     }
     return true;
@@ -185,10 +184,9 @@ bool parse_request_line(std::string req, std::string& host, std::string& path,
  * returns true; otherwise returns false for invalid formatting
  * Note: if no headers are found, returns true with headers.empty() == true */
 bool parse_headers(std::string msg, std::vector<std::string> &headers,
-    std::vector<Error>& errnos) {
-
+    Error& err) {
   if(extract_headers(msg, headers)) {
-    return verify_headers(headers, errnos);
+    return verify_headers(headers, err);
   }
   return true;     // no headers present
 }
@@ -196,15 +194,15 @@ bool parse_headers(std::string msg, std::vector<std::string> &headers,
 /* verifies that the url is correctly formatted and parses the web server's
  * host, path, and port number; otherwise returns false */
 bool parse_url(std::string url, std::string& host, std::string& path,
-    std::string& port, std::vector<Error>& errnos) {
+    std::string& port, Error& err) {
   trim(url);
 
   if(!extract_and_verify_http_prefix(url)) {
-    errnos.push_back(e_http_prefix);
+    err = e_http_prefix;
     return false;
   }
 
-  if(!extract_host_and_port(url, host, port, errnos)) {
+  if(!extract_host_and_port(url, host, port, err)) {
     return false;
   }
 
@@ -214,7 +212,7 @@ bool parse_url(std::string url, std::string& host, std::string& path,
   hints.ai_family = AF_UNSPEC;
   hints.ai_socktype = SOCK_STREAM;
   if(getaddrinfo(host.c_str(), "http", &hints, &servinfo) != 0) {
-    errnos.push_back(e_dns);
+    err = e_dns;
     return false;
   }
   freeaddrinfo(servinfo); // free memory (DNS verification successufl)
@@ -222,7 +220,7 @@ bool parse_url(std::string url, std::string& host, std::string& path,
   path = url;
   if(PATH_REQUIRED) {
     if(path.length() <= 0) {
-      errnos.push_back(e_path);
+      err = e_path;
       return false;
     }
   }
@@ -252,7 +250,7 @@ bool extract_headers(std::string msg, std::vector<std::string> &headers) {
  * URL, and HTTP VERSION, assigns elements to respective variables, and returns
  * true; otherwise, returns false if there are more/fewer than three elements */
 bool extract_request_elements(std::string req, std::string& method,
-    std::string& url, std::string& http_vers, std::vector<Error>& errnos) {
+    std::string& url, std::string& http_vers, Error& err) {
   trim(req);
   // extract each space-delimited element into a vector entry
   std::istringstream iss(req);
@@ -262,7 +260,7 @@ bool extract_request_elements(std::string req, std::string& method,
   // check that there are exactly three elements
   int num_elements = elements.size();
   if(num_elements != 3) {
-    errnos.push_back(e_req_line);
+    err = e_req_line;
     return false;
   }
 
@@ -281,12 +279,12 @@ bool extract_request_elements(std::string req, std::string& method,
  *    formatted as [host(:port)/path...] and returns true; otherwise returns
  *    false if no 'host(:port)/' is found */
 bool extract_host_and_port(std::string& url, std::string& host,
-  std::string& port, std::vector<Error>& errnos) {
+  std::string& port, Error& err) {
   std::string host_delim = "/";
   std::size_t pos = url.find(host_delim);
 
   if(pos == std::string::npos && PATH_REQUIRED) {
-    errnos.push_back(e_path);
+    err = e_path;
     return false;   // no '/' in 'host(:port)/...' found
   }
 
@@ -299,11 +297,11 @@ bool extract_host_and_port(std::string& url, std::string& host,
   }
   trim(host);
   if(host.length() <= 0 ) {
-    errnos.push_back(e_host);
+    err = e_host;
     return false; // no host found
   }
 
-  return extract_and_verify_port(host, port, errnos);
+  return extract_and_verify_port(host, port, err);
 }
 
 /* verifies the protocol prefix of the given url is 'http://', removes the
@@ -325,8 +323,7 @@ bool extract_and_verify_http_prefix(std::string& url) {
 /* accepts a host (and port) formatted as 'host' or 'host:port', respectively,
  * assigns each to the appropriate variable, assigns default port number if none
  * is present, and returns true; otherwise returns false for an invalid port */
-bool extract_and_verify_port(std::string& host, std::string& port,
-    std::vector<Error>& errnos) {
+bool extract_and_verify_port(std::string& host, std::string& port, Error& err) {
   std::string port_delim = ":";
   std::string default_port = DEFAULT_PORT;
   std::size_t pos = host.find(port_delim);
@@ -342,7 +339,7 @@ bool extract_and_verify_port(std::string& host, std::string& port,
   host = host.substr(0, pos);
 
   if(!verify_port(port)) {
-    errnos.push_back(e_port);
+    err = e_port;
     return false;
   }
 
@@ -369,8 +366,7 @@ bool verify_http_vers(std::string& http_vers) {
  * embedded whitespaces; otherwise returns false
  * Note: formats header to remove any whitespace between the name and ":" and
  * removes any duplicate 'Host' or 'Connection' headers */
-bool verify_headers(std::vector<std::string> &headers,
-    std::vector<Error> &errnos) {
+bool verify_headers(std::vector<std::string> &headers, Error& err) {
   std::size_t pos = 0;
   std::string name_delim = ":";
   std::string whitespace = " \r\n\t";
@@ -385,7 +381,7 @@ bool verify_headers(std::vector<std::string> &headers,
     orig_header = headers.at(i);
     pos = orig_header.find(name_delim);
     if(pos == std::string::npos) {  // missing ':'
-      errnos.push_back(e_headers);
+      err = e_headers;
       return false;
     }
 
@@ -395,12 +391,12 @@ bool verify_headers(std::vector<std::string> &headers,
     trim(name);
     pos = name.find_first_of(whitespace);
     if(pos != std::string::npos) {  // name has internal spaces
-      errnos.push_back(e_name_ws);
+      err = e_name_ws;
       return false;
     }
     pos = value.find_first_not_of(whitespace);
     if(pos == std::string::npos) {  // header has no value
-      errnos.push_back(e_header_val);
+      err = e_header_val;
       return false;
     }
 

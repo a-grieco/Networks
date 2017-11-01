@@ -24,17 +24,18 @@
 
 #include "parse.h"
 
-#define DEBUG_MODE true
-#define INCLUDE_CUSTOM_ERROR_MSGS true // if false, use only 500 Internal Error
-                                        // if true, include error detail
+const bool DEBUG_MODE = true;
+const bool INCLUDE_PROXY_ERROR_MSGS = true; 
 
-#define PREEMPT_EXIT true         // if true, exits if first attempt to connect
-#define MAX_SECONDS_TO_CONNECT 10 // to server exceeds MAX_SECONDS_TO_CONNECT
-                                  // (only activated if port != 80)
-#define DEFAULT_PORT_NUMBER 10042
-#define CONNECTIONS_ALLOWED 1 // will need to change for Phase 2
-#define BUFFERSIZE 10000
-#define MAXDATASIZE 100000    // max size of client HTTP request
+const bool PREEMPT_EXIT = true;         // if true, exits if the time to connect
+const int MAX_SECONDS_TO_CONNECT = 10;  // has exceeded MAX_SECONDS_TO_CONNECT
+const int STANDARD_PORT = 80;           // (PREEMPT_EXIT is only activated if
+                                        // port is not the STANDARD_PORT)
+
+const int DEFAULT_PORT_NUMBER = 10042;
+const int CONNECTIONS_ALLOWED = 1;  // TODO change to 30
+const int BUFFERSIZE = 10000;
+const int MAXDATASIZE = 100000;     // max size of client HTTP request
 
 bool port_number_is_valid(int& port_int, int port_number_arg);
 void set_port_number(char* port_buf, int port_int);
@@ -110,7 +111,7 @@ int main(int argc, char * argv[]) {
 }
 
 
-void* threaded_connection (void * new_sockfd_ptr) { 
+void* threaded_connection (void * new_sockfd_ptr) {
   int new_sockfd = *((int*) new_sockfd_ptr);
   int webserv_sockfd;
   if(DEBUG_MODE) { printf("thread created...\n"); }
@@ -287,12 +288,12 @@ bool connect_to_web_server(std::string webserv_host, std::string webserv_port,
   }
   struct timeval start, current;
   double seconds_passed;
-  if(PREEMPT_EXIT && (atoi(webserv_port.c_str()) != 80)) {
+  if(PREEMPT_EXIT && (atoi(webserv_port.c_str()) != STANDARD_PORT)) {
     gettimeofday(&start, NULL);
   }
   // loop through all the results and connect to the first one possible
   for(p = servinfo; p != NULL; p = p->ai_next) {
-    if(PREEMPT_EXIT && (atoi(webserv_port.c_str()) != 80)) {
+    if(PREEMPT_EXIT && (atoi(webserv_port.c_str()) != STANDARD_PORT)) {
       gettimeofday(&current, NULL);
       seconds_passed = (current.tv_sec - start.tv_sec);
       if(seconds_passed > MAX_SECONDS_TO_CONNECT) {
@@ -356,7 +357,7 @@ bool send_webserver_data_to_client(int webserv_sockfd, int new_sockfd) {
  * connection to the web server */
 void send_error_to_client(int& client_sockfd, std::string& custom_msg) {
   std::string error_msg = "HTTP/1.0 500 Internal error\n";
-  if(INCLUDE_CUSTOM_ERROR_MSGS) {
+  if(INCLUDE_PROXY_ERROR_MSGS) {
     error_msg += custom_msg;
   }
   error_msg += "\n";
