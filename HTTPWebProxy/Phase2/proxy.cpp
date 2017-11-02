@@ -43,7 +43,7 @@ const int BUFFERSIZE = 10000;
 const int MAXDATASIZE = 100000;     // max size of client HTTP request
 
 // TODO: exponential wait once MAX_THREADS_SUPPORTED is met (max 5-10 seconds?)
-//       (resources get sucked up fast... looping through manage_thread_count)
+//       (resources get sucked up fast looping through increment_thread_count_successful)
 // TODO: we should kick out clients who are inactive for 10+ seconds if possible
 //       ...start the timer after accept and boot them if they don't have an
 //       HTTP request in by that time
@@ -57,10 +57,10 @@ const int MAXDATASIZE = 100000;     // max size of client HTTP request
 // ...after testing that... doesn't do a thing. error? check thread creation vs. count
 
 int thread_count = -1;  // initial connection brings count to 0
-enum Thread_Count_Action { add_thread, remove_thread };
 pthread_mutex_t count_mutex = PTHREAD_MUTEX_INITIALIZER;
+void decrement_thread_count();
+bool increment_thread_count_successful();
 
-bool manage_thread_count(Thread_Count_Action& action);
 void* thread_connect (void * new_sockfd_ptr);
 
 bool port_number_is_valid(int& port_int, int port_number_arg);
@@ -123,10 +123,9 @@ int main(int argc, char * argv[]) {
     struct sigaction sa;
     socklen_t addr_size;
     addr_size = sizeof client_addr;
-    Thread_Count_Action action = add_thread;
 
     // only allow MAX_THREADS_SUPPORTED to exist simultaneously
-    while(!manage_thread_count(action)) {
+    while(!(increment_thread_count_successful())) {
      /* TODO: exponential waits X # ms -> 10 sec max? */
      //unsigned int usecs = (unsigned int)5000000;
      //usleep(usecs);
@@ -155,40 +154,34 @@ int main(int argc, char * argv[]) {
   return 0;
 }
 
-/* (tracks the number of threads running at a given moment)
- * An action to decrement the thread count always succeeds and the function
- * returns true. An action to increment the thread count succeeds and returns
- * true if the resulting count is within MAX_THREADS_SUPPORTED (inclusive);
- * otherwise the count remains unchanged and the function returns false. */
-bool manage_thread_count(Thread_Count_Action& action) {
-  bool countOk = false;
+/* Decrements the thread count atomically */
+void decrement_thread_count() {
   pthread_mutex_lock(&count_mutex);
-  // always allow terminated threads to reduce thread_count
-  if(action == remove_thread) {
-    --thread_count;
-    if(DEBUG_MODE) {
-      if(thread_count < 0) {
-        printf("thread_count negative: (%d)\n", thread_count);
-      }
-    }
-    countOk = true;
+  --thread_count;
+  if(DEBUG_MODE) { printf("thread_count decremented: %d\n", thread_count);}
+  pthread_mutex_unlock(&count_mutex);
+}
+
+/* Increments the thread_count atomically and returns true if the resulting
+ * count is within MAX_THREADS_SUPPORTED (inclusive); otherwise the count
+ * remains unchanged and the function returns false */
+bool increment_thread_count_successful() {
+  pthread_mutex_lock(&count_mutex);
+  bool success = false;
+  if(thread_count < MAX_THREADS_SUPPORTED) {
+    ++thread_count;
+    success = true;
   }
-  // only increment thread_count if it will not exceed the limit
-  else if(action == add_thread) {
-    if(thread_count < MAX_THREADS_SUPPORTED) {
-      ++thread_count;
-      countOk = true;
+  if(DEBUG_MODE) {
+    if(thread_count >= MAX_THREADS_SUPPORTED) {
+      printf("Thread count maxed out at %d threads.\n", thread_count);
     }
-    if(DEBUG_MODE) {
-      if(thread_count >= MAX_THREADS_SUPPORTED) {
-        printf("Thread count maxed out at %d threads.\n", thread_count);
-      }
-      // TODO: remove once tested enough
-      printf("Thread Count: %d\n", thread_count);
+    else {
+      printf("thread_count incremented: %d\n", thread_count);
     }
   }
   pthread_mutex_unlock(&count_mutex);
-  return countOk;
+  return success;
 }
 
 /* When successful, enables a thread to connect to a webserver, request data,
@@ -203,8 +196,7 @@ void* thread_connect (void * new_sockfd_ptr) {
                              "Please try again.\n";
     send_error_to_client(new_sockfd, custom_msg);
     close(new_sockfd);
-    Thread_Count_Action action = remove_thread;
-    while(!manage_thread_count(action)) { }
+    decrement_thread_count();
     pthread_exit(NULL);
   }
 
@@ -213,8 +205,7 @@ void* thread_connect (void * new_sockfd_ptr) {
     if(DEBUG_MODE) { printf("client error message: %s\n", data.c_str()); }
     send_error_to_client(new_sockfd, data);
     close(new_sockfd);
-    Thread_Count_Action action = remove_thread;
-    while(!manage_thread_count(action)) { }
+    decrement_thread_count();
     pthread_exit(NULL);
   }
 
@@ -226,8 +217,7 @@ void* thread_connect (void * new_sockfd_ptr) {
     std::string custom_msg = "Connection to web server failed.\n";
     send_error_to_client(new_sockfd, custom_msg);
     close(new_sockfd);
-    Thread_Count_Action action = remove_thread;
-    while(!manage_thread_count(action)) { }
+    decrement_thread_count();
     pthread_exit(NULL);
   }
 
@@ -240,8 +230,7 @@ void* thread_connect (void * new_sockfd_ptr) {
                              "Please retry request.\n";
     send_error_to_client(new_sockfd, custom_msg);
     close(new_sockfd);
-    Thread_Count_Action action = remove_thread;
-    while(!manage_thread_count(action)) { }
+    decrement_thread_count();
     pthread_exit(NULL);
   }
 
@@ -251,14 +240,12 @@ void* thread_connect (void * new_sockfd_ptr) {
                              "Please retry request.\n";
     send_error_to_client(new_sockfd, custom_msg);
     close(new_sockfd);
-    Thread_Count_Action action = remove_thread;
-    while(!manage_thread_count(action)) { }
+    decrement_thread_count();
     pthread_exit(NULL);
   }
 
   close(new_sockfd);  // release client, transaction successful
-  Thread_Count_Action action = remove_thread;
-  while(!manage_thread_count(action)) { }
+  decrement_thread_count();
   pthread_exit(NULL);
 }
 
