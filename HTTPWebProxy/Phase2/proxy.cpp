@@ -5,7 +5,6 @@
 
 // proxy receives data requests from client and uses HTTP to retrieve and
 // forward data from a given web server back to the client
-#include <pthread.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <unistd.h>
@@ -21,11 +20,12 @@
 #include <sstream>
 #include <iterator>
 #include <sys/time.h> // using wall clock time
+#include <pthread.h>
 
 #include "parse.h"
 
 const bool DEBUG_MODE = true;
-const bool INCLUDE_PROXY_ERROR_MSGS = true; 
+const bool INCLUDE_PROXY_ERROR_MSGS = true;
 
 const bool PREEMPT_EXIT = true;         // if true, exits if the time to connect
 const int MAX_SECONDS_TO_CONNECT = 10;  // has exceeded MAX_SECONDS_TO_CONNECT
@@ -33,21 +33,48 @@ const int STANDARD_PORT = 80;           // (PREEMPT_EXIT is only activated if
                                         // port is not the STANDARD_PORT)
 
 const int DEFAULT_PORT_NUMBER = 10042;
-const int CONNECTIONS_ALLOWED = 1;  // TODO change to 30
+const int CONNECTIONS_ALLOWED = 5;    // TODO change to 30?
+const int MAX_THREADS_SUPPORTED = 5;  // TODO change to 30.
+                                      // note: is approximate, possible thread
+                                      // count may fluctuate-> count decremented
+                                      // just before pthread exits (could create
+                                      // new thread in overlap - s/b ok)
 const int BUFFERSIZE = 10000;
 const int MAXDATASIZE = 100000;     // max size of client HTTP request
 
+// TODO: exponential wait once MAX_THREADS_SUPPORTED is met (max 5-10 seconds?)
+//       (resources get sucked up fast... looping through manage_thread_count)
+// TODO: we should kick out clients who are inactive for 10+ seconds if possible
+//       ...start the timer after accept and boot them if they don't have an
+//       HTTP request in by that time
+// TODO: below (the -1 initializer for thread_count) - I think that's what's
+//       happening, but I don't really grok why... will read up on that
+// TODO: we may want to reduce CONNECTIONS_ALLOWED.. For example, say we have
+//       CONNECTIONS_ALLOWED = 5 and MAX_THREADS_SUPPORTED = 5, this means we
+//       can have 5 threads running and 5 waiting, no one is denied a connection
+//       nbd with 5, but 30? That could be a long wait w/ 30 and 30. May want to
+//       start showing the connection failing before that to tip off the client
+// ...after testing that... doesn't do a thing. error? check thread creation vs. count
+
+int thread_count = -1;  // initial connection brings count to 0
+enum Thread_Count_Action { add_thread, remove_thread };
+pthread_mutex_t count_mutex = PTHREAD_MUTEX_INITIALIZER;
+
+bool manage_thread_count(Thread_Count_Action& action);
+void* thread_connect (void * new_sockfd_ptr);
+
 bool port_number_is_valid(int& port_int, int port_number_arg);
 void set_port_number(char* port_buf, int port_int);
-void create_and_bind_to_socket(int& webserv_sockfd, const char* port_buf);
-bool get_msg_from_client(int webserv_sockfd, std::string& client_msg);
+
+void create_and_bind_to_socket(int& client_sockfd, const char* port_buf);
+bool get_msg_from_client(int client_sockfd, std::string& client_msg);
 bool connect_to_web_server(std::string webserv_host, std::string webserv_port,
     int& webserv_sockfd);
 bool send_webserver_data_to_client(int webserv_sockfd, int new_sockfd);
 void send_error_to_client(int& client_sockfd, std::string& custom_msg);
+
 int send_all(int socket, char *data_buf, int *length);
 void clean_exit(int flag);
-void* threaded_connection (void * new_sockfd_ptr);
 
 int main(int argc, char * argv[]) {
 
@@ -66,9 +93,7 @@ int main(int argc, char * argv[]) {
   }
   set_port_number(port_buf, port_int);
 
-  // get data from client
   int client_sockfd;
-
   create_and_bind_to_socket(client_sockfd, port_buf);
 
   // listen for incomming client connections
@@ -78,10 +103,19 @@ int main(int argc, char * argv[]) {
   };
   if(DEBUG_MODE) { printf("Proxy listening for connections...\n"); }
 
-
+  // set threads to be detached (able to exit without joining)
   pthread_attr_t attr;
-  pthread_attr_init(&attr);
-  pthread_attr_setdetachstate(&attr,PTHREAD_CREATE_DETACHED);
+  int ret;
+  if((ret = pthread_attr_init(&attr))) {
+    printf("error %d: pthread_attr_init()\n", ret);
+    exit(EXIT_FAILURE);
+  }
+  if((ret = pthread_attr_setdetachstate(&attr, PTHREAD_CREATE_DETACHED))) {
+    printf("error %d: pthread_attr_setdetachstate()\n", ret);
+    exit(EXIT_FAILURE);
+  }
+  // TODO: verify reuse of attr is working - see pthread_attr_getdetachedstate()
+
   // accept incoming connections
   while(true) {
     int new_sockfd;
@@ -89,29 +123,77 @@ int main(int argc, char * argv[]) {
     struct sigaction sa;
     socklen_t addr_size;
     addr_size = sizeof client_addr;
-    //unsigned int usecs = (unsigned int)5000000;
-    //usleep(usecs);
+    Thread_Count_Action action = add_thread;
+
+    // only allow MAX_THREADS_SUPPORTED to exist simultaneously
+    while(!manage_thread_count(action)) {
+     /* TODO: exponential waits X # ms -> 10 sec max? */
+     //unsigned int usecs = (unsigned int)5000000;
+     //usleep(usecs);
+    }
     new_sockfd = accept(client_sockfd, (struct sockaddr *)&client_addr,
       &addr_size);
     if(new_sockfd == -1) {
       perror("accept");
       continue;
     }
-    pthread_t thread;
-    //pthread_detach(thread);
-    if(DEBUG_MODE) { printf("Creating thread...\n"); }
-    pthread_create(&thread, &attr, threaded_connection, &new_sockfd);
 
+    int err;
+    pthread_t thread;
+    if(DEBUG_MODE) { printf("Creating thread...\n"); }
+    if((err = pthread_create(&thread, &attr, thread_connect, &new_sockfd))) {
+      printf("Thread creation failed: %s\n", err);
+      close(new_sockfd);
+    }
   }
-  pthread_attr_destroy(&attr);
+
+  pthread_attr_destroy(&attr);  // code should not reach this point
+                                // (detached attr reused for all threads)
   signal(SIGTERM, clean_exit);
   signal(SIGINT, clean_exit);
 
   return 0;
 }
 
+/* (tracks the number of threads running at a given moment)
+ * An action to decrement the thread count always succeeds and the function
+ * returns true. An action to increment the thread count succeeds and returns
+ * true if the resulting count is within MAX_THREADS_SUPPORTED (inclusive);
+ * otherwise the count remains unchanged and the function returns false. */
+bool manage_thread_count(Thread_Count_Action& action) {
+  bool countOk = false;
+  pthread_mutex_lock(&count_mutex);
+  // always allow terminated threads to reduce thread_count
+  if(action == remove_thread) {
+    --thread_count;
+    if(DEBUG_MODE) {
+      if(thread_count < 0) {
+        printf("thread_count negative: (%d)\n", thread_count);
+      }
+    }
+    countOk = true;
+  }
+  // only increment thread_count if it will not exceed the limit
+  else if(action == add_thread) {
+    if(thread_count < MAX_THREADS_SUPPORTED) {
+      ++thread_count;
+      countOk = true;
+    }
+    if(DEBUG_MODE) {
+      if(thread_count >= MAX_THREADS_SUPPORTED) {
+        printf("Thread count maxed out at %d threads.\n", thread_count);
+      }
+      // TODO: remove once tested enough
+      printf("Thread Count: %d\n", thread_count);
+    }
+  }
+  pthread_mutex_unlock(&count_mutex);
+  return countOk;
+}
 
-void* threaded_connection (void * new_sockfd_ptr) {
+/* When successful, enables a thread to connect to a webserver, request data,
+ * and return that data to a client. If unsuccessful, sends error to client. */
+void* thread_connect (void * new_sockfd_ptr) {
   int new_sockfd = *((int*) new_sockfd_ptr);
   int webserv_sockfd;
   if(DEBUG_MODE) { printf("thread created...\n"); }
@@ -121,6 +203,8 @@ void* threaded_connection (void * new_sockfd_ptr) {
                              "Please try again.\n";
     send_error_to_client(new_sockfd, custom_msg);
     close(new_sockfd);
+    Thread_Count_Action action = remove_thread;
+    while(!manage_thread_count(action)) { }
     pthread_exit(NULL);
   }
 
@@ -129,6 +213,8 @@ void* threaded_connection (void * new_sockfd_ptr) {
     if(DEBUG_MODE) { printf("client error message: %s\n", data.c_str()); }
     send_error_to_client(new_sockfd, data);
     close(new_sockfd);
+    Thread_Count_Action action = remove_thread;
+    while(!manage_thread_count(action)) { }
     pthread_exit(NULL);
   }
 
@@ -140,6 +226,8 @@ void* threaded_connection (void * new_sockfd_ptr) {
     std::string custom_msg = "Connection to web server failed.\n";
     send_error_to_client(new_sockfd, custom_msg);
     close(new_sockfd);
+    Thread_Count_Action action = remove_thread;
+    while(!manage_thread_count(action)) { }
     pthread_exit(NULL);
   }
 
@@ -152,6 +240,8 @@ void* threaded_connection (void * new_sockfd_ptr) {
                              "Please retry request.\n";
     send_error_to_client(new_sockfd, custom_msg);
     close(new_sockfd);
+    Thread_Count_Action action = remove_thread;
+    while(!manage_thread_count(action)) { }
     pthread_exit(NULL);
   }
 
@@ -161,10 +251,15 @@ void* threaded_connection (void * new_sockfd_ptr) {
                              "Please retry request.\n";
     send_error_to_client(new_sockfd, custom_msg);
     close(new_sockfd);
+    Thread_Count_Action action = remove_thread;
+    while(!manage_thread_count(action)) { }
     pthread_exit(NULL);
   }
 
   close(new_sockfd);  // release client, transaction successful
+  Thread_Count_Action action = remove_thread;
+  while(!manage_thread_count(action)) { }
+  pthread_exit(NULL);
 }
 
 /* Assigns user specified port number and returns true if argument valid, i.e.
@@ -190,8 +285,9 @@ void set_port_number(char* port_buf, int port_int) {
  }
 
 /* Creates a socket for the proxy and binds to it based on the defined port
- * number or prints error and exits on failure. */
-void create_and_bind_to_socket(int& webserv_sockfd, const char* port_buf) {
+ * number or prints error and exits on failure.
+ * (Socket created is designated to listening for client requests) */
+void create_and_bind_to_socket(int& client_sockfd, const char* port_buf) {
   struct addrinfo hints, *servinfo, *p;
   int rv;
 
@@ -207,14 +303,14 @@ void create_and_bind_to_socket(int& webserv_sockfd, const char* port_buf) {
 
   // loop through all the results and connect to the first one possible
   for(p = servinfo; p != NULL; p = p->ai_next) {
-    if((webserv_sockfd = socket(p->ai_family, p->ai_socktype, p->ai_protocol))
+    if((client_sockfd = socket(p->ai_family, p->ai_socktype, p->ai_protocol))
         == -1) {
       perror("socket");
       continue;
     }
-    if(bind(webserv_sockfd, p->ai_addr, p->ai_addrlen) == -1) {
+    if(bind(client_sockfd, p->ai_addr, p->ai_addrlen) == -1) {
       perror("bind");
-      close(webserv_sockfd);
+      close(client_sockfd);
       continue;
     }
     break;  // if code reaches this point, connection was made successfully
@@ -231,7 +327,7 @@ void create_and_bind_to_socket(int& webserv_sockfd, const char* port_buf) {
 
 /* Receives HTTP message from client and returns as a string; marks the end of
  * the message with two repeating newlines (4 characters: '\r\n\r\n') */
-bool get_msg_from_client(int webserv_sockfd, std::string& client_msg) {
+bool get_msg_from_client(int client_sockfd, std::string& client_msg) {
   int numbytes = 0, totalbytes = 0;
   char mssg_buf[BUFFERSIZE];
   char fullmssg_buf[MAXDATASIZE];
@@ -243,7 +339,7 @@ bool get_msg_from_client(int webserv_sockfd, std::string& client_msg) {
   if(DEBUG_MODE) { printf("\nRetrieving message...\n"); }
   // retrieve message from client
   while(!message_completed) {
-    if((numbytes = recv(webserv_sockfd, mssg_buf, BUFFERSIZE-1, 0)) == -1) {
+    if((numbytes = recv(client_sockfd, mssg_buf, BUFFERSIZE-1, 0)) == -1) {
       perror("recv");
       printf("Receiving HTTP request from client\n");
       return false;
