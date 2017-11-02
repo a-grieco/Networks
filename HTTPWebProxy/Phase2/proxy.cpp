@@ -21,6 +21,8 @@
 #include <iterator>
 #include <sys/time.h> // using wall clock time
 #include <pthread.h>
+#include <thread>
+#include <chrono>
 
 #include "parse.h"
 
@@ -33,12 +35,15 @@ const int STANDARD_PORT = 80;           // (PREEMPT_EXIT is only activated if
                                         // port is not the STANDARD_PORT)
 
 const int DEFAULT_PORT_NUMBER = 10042;
-const int CONNECTIONS_ALLOWED = 5;    // TODO change to 30?
-const int MAX_THREADS_SUPPORTED = 5;  // TODO change to 30.
+const int CONNECTIONS_ALLOWED = 1;    // TODO change to 30?
+const int MAX_THREADS_SUPPORTED = 2;  // TODO change to 30.
                                       // note: is approximate, possible thread
                                       // count may fluctuate-> count decremented
                                       // just before pthread exits (could create
                                       // new thread in overlap - s/b ok)
+const int MAX_SLEEP_SECONDS = 10;  // max time to wait before attempting to
+                                   // create a new thread
+
 const int BUFFERSIZE = 10000;
 const int MAXDATASIZE = 100000;     // max size of client HTTP request
 
@@ -49,12 +54,15 @@ const int MAXDATASIZE = 100000;     // max size of client HTTP request
 //       HTTP request in by that time
 // TODO: below (the -1 initializer for thread_count) - I think that's what's
 //       happening, but I don't really grok why... will read up on that
+// TODO: divide custom messages from main program - use error.h? have a globally
+//       assigned variable independent of passing to send_error_to_client?
 // TODO: we may want to reduce CONNECTIONS_ALLOWED.. For example, say we have
 //       CONNECTIONS_ALLOWED = 5 and MAX_THREADS_SUPPORTED = 5, this means we
 //       can have 5 threads running and 5 waiting, no one is denied a connection
 //       nbd with 5, but 30? That could be a long wait w/ 30 and 30. May want to
 //       start showing the connection failing before that to tip off the client
 // ...after testing that... doesn't do a thing. error? check thread creation vs. count
+// can attempt to connect well over the sum of the two limits w/out rejection
 
 int thread_count = -1;  // initial connection brings count to 0
 pthread_mutex_t count_mutex = PTHREAD_MUTEX_INITIALIZER;
@@ -125,8 +133,16 @@ int main(int argc, char * argv[]) {
     addr_size = sizeof client_addr;
 
     // only allow MAX_THREADS_SUPPORTED to exist simultaneously
+    int sleep_seconds = 0;
     while(!(increment_thread_count_successful())) {
-     /* TODO: exponential waits X # ms -> 10 sec max? */
+     // if unsuccessful, wait before trying again
+     if(sleep_seconds < MAX_SLEEP_SECONDS) {
+       ++sleep_seconds;
+       std::this_thread::sleep_for(std::chrono::seconds(sleep_seconds));
+     }
+     else {
+       sleep_seconds = sleep_seconds/2;
+     }
      //unsigned int usecs = (unsigned int)5000000;
      //usleep(usecs);
     }
@@ -173,7 +189,7 @@ bool increment_thread_count_successful() {
     success = true;
   }
   if(DEBUG_MODE) {
-    if(thread_count >= MAX_THREADS_SUPPORTED) {
+    if(thread_count >= MAX_THREADS_SUPPORTED && !success) {
       printf("Thread count maxed out at %d threads.\n", thread_count);
     }
     else {

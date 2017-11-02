@@ -1,5 +1,5 @@
 CFLAGS = -O
-CC = g++
+CC = g++ -g -std=c++11
 SRC = proxy.cpp parse.cpp
 OBJ = $(SRC:.cpp = .o)
 
