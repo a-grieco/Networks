@@ -256,7 +256,9 @@ void* thread_connect (void * new_sockfd_ptr) {
   int length = data.length();
   if(send_all(webserv_sockfd, (char*)data.c_str(), &length) == -1) {
     perror("send_all");
-    printf("%d bytes of HTTP request sent to web server.\n", length);
+    if(DEBUG_MODE) {
+      printf("%d bytes of HTTP request sent to web server.\n", length);
+    }
     Proxy_Error err = e_serv_send;
     send_error_to_client(new_sockfd, err);
     close(new_sockfd);
@@ -355,7 +357,7 @@ bool get_msg_from_client(int client_sockfd, std::string& client_msg) {
   while(!message_completed) {
     if((numbytes = recv(client_sockfd, mssg_buf, BUFFERSIZE-1, 0)) == -1) {
       perror("recv");
-      printf("Receiving HTTP request from client\n");
+      if(DEBUG_MODE) { printf("Getting HTTP request from client.\n"); }
       return false;
     }
     totalbytes += numbytes;
@@ -411,13 +413,13 @@ bool connect_to_web_server(std::string webserv_host, std::string webserv_port,
         return false; // failed to connect within time limit
       }
     }
-    if((webserv_sockfd = socket(p->ai_family, p->ai_socktype, p->ai_protocol))
-        == -1) {
-      perror("web server socket");
+    webserv_sockfd = socket(p->ai_family, p->ai_socktype, p->ai_protocol);
+    if(webserv_sockfd == -1) {
+      perror("(web server) socket");
       continue;
     }
     if(connect(webserv_sockfd, p->ai_addr, p->ai_addrlen) == -1) {
-      perror("web server connect");
+      perror("(web server) connect");
       close(webserv_sockfd);
       continue;
     }
@@ -443,7 +445,7 @@ bool send_webserver_data_to_client(int webserv_sockfd, int new_sockfd) {
   while(!message_completed) {
     if((numbytes = recv(webserv_sockfd, mssg_buf, BUFFERSIZE-1, 0)) == -1) {
       perror("recv");
-      printf("Retrieving data from web server");
+      if(DEBUG_MODE) { printf("Retrieving data from web server.\n"); }
       Proxy_Error err = e_serv_recv;
       send_error_to_client(new_sockfd, err);
       return false;
@@ -459,8 +461,9 @@ bool send_webserver_data_to_client(int webserv_sockfd, int new_sockfd) {
     int length = proxy_string.length();
     if(send_all(new_sockfd, (char*)proxy_string.c_str(), &length) == -1) {
       perror("send_all");
-      printf("%d bytes of web server data sent to client.\n", length);
-      // don't send error to client if new_sockfd bad (disconnect)
+      if(DEBUG_MODE) {
+        printf("%d bytes of web server data sent to client.\n", length);
+      }
       return false;
     }
     memset(mssg_buf, 0, sizeof mssg_buf);
@@ -480,7 +483,9 @@ void send_error_to_client(int& client_sockfd, std::string& parse_err) {
   int length = error_msg.length();
   if(send_all(client_sockfd, (char*)error_msg.c_str(), &length) == -1) {
     perror("send_all");
-    printf("%d bytes of error message sent to client.\n", length);
+    if(DEBUG_MODE) {
+      printf("%d bytes of error message sent to client.\n", length);
+    }
   }
 }
 
@@ -493,7 +498,9 @@ void send_error_to_client(int& client_sockfd, Proxy_Error& err) {
   int length = error_msg.length();
   if(send_all(client_sockfd, (char*)error_msg.c_str(), &length) == -1) {
     perror("send_all");
-    printf("%d bytes of error message sent to client.\n", length);
+    if(DEBUG_MODE) {
+      printf("%d bytes of error message sent to client.\n", length);
+    }
   }
 }
 
@@ -516,7 +523,8 @@ void get_proxy_error_msg(std::string msg, Proxy_Error& err) {
   }
 }
 
-/* Handles partial sends - based on sample from beej */
+/* Handles partial sends - based on sample from beej: if successful, assigns
+ * total_bytes_sent and returns 0; otherwise, returns -1 on failure */
 int send_all(int socket, char *data_buf, int *length) {
   int total_bytes_sent = 0;
   int bytes_left = *length;
@@ -529,8 +537,8 @@ int send_all(int socket, char *data_buf, int *length) {
     bytes_left -= numbytes;
   }
 
-  *length = total_bytes_sent; // assign actual number of bytes sent
-  return numbytes == -1 ? -1 : 0; // return -1 on success or 0 on failure
+  *length = total_bytes_sent;
+  return numbytes == -1 ? -1 : 0;
 }
 
 /* Helps to ensure port is freed upoon a "rough" exit from a program */
