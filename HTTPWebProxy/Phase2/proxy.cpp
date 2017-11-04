@@ -109,17 +109,17 @@ int main(int argc, char * argv[]) {
   if(DEBUG_MODE) { printf("Proxy listening for connections...\n"); }
 
   // set threads to be detached (able to exit without joining)
-  pthread_attr_t attr;
-  int ret;
-  int state;  // TODO: remove if state check eliminated
-  if((ret = pthread_attr_init(&attr))) {
-    printf("error %d: pthread_attr_init()\n", ret);
-    exit(EXIT_FAILURE);
-  }
-  if((ret = pthread_attr_setdetachstate(&attr, PTHREAD_CREATE_DETACHED))) {
-    printf("error %d: pthread_attr_setdetachstate()\n", ret);
-    exit(EXIT_FAILURE);
-  }
+  // pthread_attr_t attr;
+  // int ret;
+  // int state;  // TODO: remove if state check eliminated
+  // if((ret = pthread_attr_init(&attr))) {
+  //   printf("error %d: pthread_attr_init()\n", ret);
+  //   exit(EXIT_FAILURE);
+  // }
+  // if((ret = pthread_attr_setdetachstate(&attr, PTHREAD_CREATE_DETACHED))) {
+  //   printf("error %d: pthread_attr_setdetachstate()\n", ret);
+  //   exit(EXIT_FAILURE);
+  // }
 
   // TODO: try placing just after main if not working here
   signal(SIGPIPE, SIG_IGN); // ignore errors that cause proxy to shut down
@@ -142,8 +142,8 @@ int main(int argc, char * argv[]) {
     }
 
     // TODO: begin DELETE ME! (fix or remove this check)
-    ret = pthread_attr_getdetachstate(&attr, &state);
-    check_state_temp(ret, state); // TODO: DELETE ME!
+    // ret = pthread_attr_getdetachstate(&attr, &state);
+    // check_state_temp(ret, state); // TODO: DELETE ME!
     // TODO: end DELETE ME!
 
     new_sockfd = accept(client_sockfd, (struct sockaddr *)&client_addr,
@@ -154,15 +154,19 @@ int main(int argc, char * argv[]) {
     }
 
     int err;
-    pthread_t thread;
+    pthread_t thread_id;
     if(DEBUG_MODE) { printf("Creating thread...\n"); }
-    if((err = pthread_create(&thread, &attr, thread_connect, &new_sockfd))) {
+    if((err = pthread_create(&thread_id, NULL, thread_connect, &new_sockfd))) {
       printf("Thread creation failed: %s\n", err);
       close(new_sockfd);
     }
+
+    if(pthread_detach(thread_id) != 0) {
+      perror("pthread_detach");
+    }
   }
 
-  pthread_attr_destroy(&attr);  // code should not reach this point
+  // pthread_attr_destroy(&attr);  // code should not reach this point
                                 // (detached attr reused for all threads)
   signal(SIGTERM, clean_exit);
   signal(SIGINT, clean_exit);
@@ -224,8 +228,8 @@ void* thread_connect (void * new_sockfd_ptr) {
   if(DEBUG_MODE) { printf("thread created...\n"); }
   std::string client_msg, webserv_host, webserv_port, data;
   if(!get_msg_from_client(new_sockfd, client_msg)) {
-    Proxy_Error err = e_read_req;
-    send_error_to_client(new_sockfd, err);   // TODO: check socket or delete?
+    // Proxy_Error err = e_read_req;
+    // send_error_to_client(new_sockfd, err);   // TODO: check socket or delete?
     close(new_sockfd);
     decrement_thread_count();
     pthread_exit(NULL);
@@ -344,14 +348,18 @@ void create_and_bind_to_socket(int& client_sockfd, const char* port_buf) {
 /* Receives HTTP message from client and returns as a string; marks the end of
  * the message with two repeating newlines (4 characters: '\r\n\r\n') */
 bool get_msg_from_client(int client_sockfd, std::string& client_msg) {
-  int numbytes = 0, totalbytes = 0;
+  int numbytes = 0, totalbytes = 0; // TODO: delete totalbytes
   char mssg_buf[BUFFERSIZE];
-  char fullmssg_buf[MAXDATASIZE];
   memset(mssg_buf, 0, sizeof mssg_buf);
-  memset(fullmssg_buf, 0, sizeof fullmssg_buf);
-  char msg_end[] = { '\r', '\n', '\r', '\n' };
-  int end_size = sizeof(msg_end);
+  std::string full_mssg;
+  std::string mssg_end = "\r\n\r\n";
   bool message_completed = false;
+  std::size_t found;
+
+  // to detect an endless, errorless, dataless recv()
+  int err_detect_count = 0;
+  int max_blank_recvs_permitted = 3;
+
   if(DEBUG_MODE) { printf("\nRetrieving message...\n"); }
   // retrieve message from client
   while(!message_completed) {
@@ -360,27 +368,41 @@ bool get_msg_from_client(int client_sockfd, std::string& client_msg) {
       if(DEBUG_MODE) { printf("Getting HTTP request from client.\n"); }
       return false;
     }
-    totalbytes += numbytes;
-    strcat(fullmssg_buf,mssg_buf);
+    totalbytes += numbytes;   // TODO: delete me
+    //strcat(fullmssg_buf,mssg_buf);
+    full_mssg += std::string(mssg_buf);
     if(DEBUG_MODE) {
       mssg_buf[numbytes] = '\0';
-      printf("   %s", mssg_buf);
+      // printf("*************************************************************\n");
+      // printf("numbytes: %d, totalbytes: %d\n\n", numbytes, totalbytes);   // TODO: delete me
+      // if(numbytes != totalbytes) { printf("mssg_buf:\n%s\n", mssg_buf); } // TODO: delete me
+      // printf("full_mssg:\n[%s]\n", full_mssg.c_str());                    // TODO: delete me
+      // printf("*************************************************************\n");
     }
     memset(mssg_buf, 0, sizeof mssg_buf);
 
     // check if client message is complete
-    if(totalbytes >= end_size) {
+    found = full_mssg.find(mssg_end);
+    if(found != std::string::npos) {
       message_completed = true;
-      for(int i = 0; i < end_size; ++i) {
-        if(msg_end[i] != fullmssg_buf[totalbytes-end_size+i]) {
-          message_completed = false;
-          break;
-        }
+    }
+
+    // check if recv() is in an endless loop
+    if(numbytes == 0) {
+      ++err_detect_count;
+    }
+    else {
+      err_detect_count = 0;
+    }
+    if(err_detect_count >= max_blank_recvs_permitted) {
+      message_completed = true;
+      if(DEBUG_MODE) {
+        printf("%d strikes, exiting after blank recv()\n", err_detect_count);
       }
     }
   }
   if(DEBUG_MODE) { printf("...message complete\n"); }
-  client_msg = std::string(fullmssg_buf);
+  client_msg = full_mssg;
   return true;
 }
 
