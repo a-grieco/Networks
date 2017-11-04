@@ -16,8 +16,11 @@
 
 #include "parse.h"
 
+// TODO:  std::string alt_msg_end = "\r\n"; // should handle both gracefully
+// TODO:  fix unnecessary body code...
+
 const bool DEBUG_MODE = false;
-const bool INCLUDE_PARSING_ERROR_MSGS = false;
+const bool INCLUDE_PARSING_ERROR_MSGS = true;
 
 const bool PATH_REQUIRED = false; // false: uses default "GET / HTTP/1.0" format
                                   //       if client message has no defined path
@@ -137,7 +140,7 @@ void get_parse_error_msg(std::string& data, Parse_Error& err) {
 /* extracts web server host, path, and port number and headers (if present) from
  * the client message and returns true if successful; otherwise returns false */
 bool parse_client_msg(std::string msg, std::string& host, std::string& path,
-    std::string& port, std::vector<std::string>& headers, Parse_Error& err) {
+  std::string& port, std::vector<std::string>& headers, Parse_Error& err) {
 
   // get first line of client request
   std::string delimiter = "\r\n";
@@ -236,12 +239,21 @@ bool extract_headers(std::string msg, std::vector<std::string> &headers) {
 
   if(msg.empty()) { return false; }
 
-  while(!msg.empty()) {
+  bool all_headers_extracted = false;
+  while(!all_headers_extracted && !msg.empty()) {
     pos = msg.find(eol_delim);
-    if(pos != std::string::npos && pos > 0) {
-      headers.push_back(msg.substr(0, pos));
+    if(pos != std::string::npos) {
+      if(pos > 0) {
+        headers.push_back(msg.substr(0, pos));
+      }
+      else {
+        all_headers_extracted = true;
+      }
+      msg.erase(0, pos + eol_delim.size());
     }
-    msg.erase(0, pos + eol_delim.size());
+    else {
+      all_headers_extracted = true;
+    }
   }
   return true;
 }
@@ -371,7 +383,7 @@ bool verify_headers(std::vector<std::string> &headers, Parse_Error& err) {
   std::size_t pos = 0;
   std::string name_delim = ":";
   std::string whitespace = " \r\n\t";
-  std::string def_host = "Host", def_conn = "Connection";
+  std::string def_host = "Host", def_conn = "Connection", def_pc_temp = "Proxy-Connection"; // TODO: should only need first two
   std::vector<int> dup_headers_found;
 
   std::string orig_header, name, value;
@@ -404,7 +416,7 @@ bool verify_headers(std::vector<std::string> &headers, Parse_Error& err) {
     headers.at(i) = name + value;
 
     // track indices of headers with names: 'Host' and/or 'Connection'
-    if(is_match_caseins(def_host, name) || is_match_caseins(def_conn, name)) {
+    if(is_match_caseins(def_host, name) || is_match_caseins(def_conn, name) || is_match_caseins(def_pc_temp, name)) {
       dup_headers_found.push_back(i);
     }
   }
