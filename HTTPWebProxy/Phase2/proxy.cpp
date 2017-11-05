@@ -26,7 +26,7 @@
 
 #include "parse.h"
 
-const bool DEBUG_MODE = true;
+const bool DEBUG_MODE = false;
 const bool INCLUDE_PROXY_ERROR_MSGS = true;
 
 const std::string STANDARD_ERROR_MESSAGE = "HTTP/1.0 500 Internal error\n";
@@ -199,6 +199,7 @@ void* thread_connect (void * new_sockfd_ptr) {
     if(seconds_passed > 10) {
       printf("_timer_timer_timer_timer_timer_timer_timer_timer_timer_timer_timer_\n");
       printf("!get_msg_from_client exited after %f seconds\n", seconds_passed);
+      printf("attemting to get req_headers: %s\n", req_headers.c_str());
       printf("_timer_timer_timer_timer_timer_timer_timer_timer_timer_timer_timer_\n");
     }
     /* TODO: remove after testing */
@@ -424,6 +425,18 @@ bool get_msg_from_client(int client_sockfd, std::string& req_header_mssg,
         message_complete = true;
       }
     }
+    /* TODO: remove after testing */
+    gettimeofday(&current, NULL); // TODO: remove
+    seconds_passed = (current.tv_sec - start.tv_sec);
+    if(seconds_passed > 3 && strlen(fullmssg_buf) <= 0) {
+      printf("_timer_EXIT_timer_EXIT_timer_EXIT_timer_EXIT_timer_EXIT_timer_\n");
+      printf("get_msg_from_client EXITED after %f seconds\n", seconds_passed);
+      printf("data retrieved so far: %s\n", fullmssg_buf);
+      printf("_timer_EXIT_timer_EXIT_timer_EXIT_timer_EXIT_timer_EXIT_timer_\n");
+      return false;
+    }
+    /* TODO: remove after testing */
+
   } // message_complete
   //if(DEBUG_MODE) { printf("...message complete\n"); }
 
@@ -557,7 +570,10 @@ bool send_webserver_data_to_client(int webserv_sockfd, int new_sockfd) {
   std::string proxy_string;
   bool message_completed = false;
 
+  int count = 0;  // TODO: remove
+
   while(!message_completed) {
+    ++count;  // TODO: remove
     if((numbytes = recv(webserv_sockfd, mssg_buf, BUFFERSIZE-1, 0)) == -1) {
       perror("Retrieving data from web server.\n\trecv");
       Proxy_Error err = e_serv_recv;
@@ -576,6 +592,11 @@ bool send_webserver_data_to_client(int webserv_sockfd, int new_sockfd) {
         return false;
       }
       memset(mssg_buf, 0, sizeof mssg_buf);
+    }
+    if(seconds_passed > 3 && !message_completed) {
+      printf("_timer_message_completed_timer_message_completed_timer_\n");
+      printf("%d loops, %f seconds, current numbytes %d\n", count, seconds_passed, numbytes);
+      printf("_timer_message_completed_timer_message_completed_timer_\n");
     }
   }
 
