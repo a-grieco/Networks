@@ -1,4 +1,4 @@
-CFLAGS = -O
+CFLAGS = -O3
 CC = g++ -g -std=c++11
 SRC = proxy.cpp parse.cpp
 OBJ = $(SRC:.cpp = .o)

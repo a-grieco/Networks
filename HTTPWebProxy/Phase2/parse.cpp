@@ -16,16 +16,9 @@
 
 #include "parse.h"
 
-// TODO:  std::string alt_msg_end = "\r\n"; // should handle both gracefully
-// TODO:  fix unnecessary body code...
-
 const bool DEBUG_MODE = false;
 const bool INCLUDE_PARSING_ERROR_MSGS = true;
 
-const bool PATH_REQUIRED = false; // false: uses default "GET / HTTP/1.0" format
-                                  //       if client message has no defined path
-                                  // true: client message is declared invalid
-                                  //       if no path is defined
 const std::string DEFAULT_PORT = "80";
 const std::string VALID_METHOD = "GET";
 const std::string VALID_HTTP_VERS = "HTTP/1.0";
@@ -60,7 +53,7 @@ bool get_parsed_data(std::string client_msg, std::string& webserv_host,
     return true;
   }
 
-  // otherwise, generate error message and return false
+  // otherwise, if parse unsuccessful, return false
   if(DEBUG_MODE) { printf("in <parse.cpp> parse_client_msg detected error\n"); }
   if(INCLUDE_PARSING_ERROR_MSGS) { get_parse_error_msg(data, err); }
   return false;
@@ -143,13 +136,18 @@ bool parse_client_msg(std::string msg, std::string& host, std::string& path,
   std::string& port, std::vector<std::string>& headers, Parse_Error& err) {
 
   // get first line of client request
-  std::string delimiter = "\r\n";
+  std::string delimiter = "\r\n";   // standard cr lf
+  std::string alt_delimiter = "\n"; // handle (non-standard) lf
   std::size_t pos = msg.find(delimiter);
+  if(pos == std::string::npos) {
+    delimiter = alt_delimiter;
+    pos = msg.find(delimiter);
+  }
   std::string req = msg.substr(0, pos);
   msg.erase(0, pos + delimiter.size());
 
   if(parse_request_line(req, host, path, port, err)) {
-    // extract headers if present
+    // request line parse successful, extract headers if present
     if(msg.size() > 0) {
       return(parse_headers(msg, headers, err));
     }
@@ -214,26 +212,20 @@ bool parse_url(std::string url, std::string& host, std::string& path,
   memset(&hints, 0, sizeof hints);
   hints.ai_family = AF_UNSPEC;
   hints.ai_socktype = SOCK_STREAM;
-  if(getaddrinfo(host.c_str(), "http", &hints, &servinfo) != 0) {
+  if(getaddrinfo(host.c_str(), port.c_str(), &hints, &servinfo) != 0) {
     err = e_dns;
     return false;
   }
   freeaddrinfo(servinfo); // free memory (DNS verification successufl)
 
   path = url;
-  if(PATH_REQUIRED) {
-    if(path.length() <= 0) {
-      err = e_path;
-      return false;
-    }
-  }
-
   return true;
 }
 
 /* extracts each header line from 'msg' into an element in 'headers' and returns
  * true if headers are present; otherwise returns false */
 bool extract_headers(std::string msg, std::vector<std::string> &headers) {
+  std::string eol_delim_used;
   std::string eol_delim = "\r\n";   // standard is cr lf
   std::string alt_eol_delim = "\n"; // handle (non-standard) lf
   std::size_t pos = 0;
@@ -243,8 +235,10 @@ bool extract_headers(std::string msg, std::vector<std::string> &headers) {
   bool all_headers_extracted = false;
   while(!all_headers_extracted && !msg.empty()) {
     pos = msg.find(eol_delim);
+    eol_delim_used = eol_delim;
     if(pos == std::string::npos) {
       pos = msg.find(alt_eol_delim);
+      eol_delim_used = alt_eol_delim;
     }
     if(pos != std::string::npos) {
       if(pos > 0) {
@@ -253,7 +247,7 @@ bool extract_headers(std::string msg, std::vector<std::string> &headers) {
       else {
         all_headers_extracted = true;
       }
-      msg.erase(0, pos + eol_delim.size());
+      msg.erase(0, pos + eol_delim_used.size());
     }
     else {
       all_headers_extracted = true;
@@ -288,21 +282,12 @@ bool extract_request_elements(std::string req, std::string& method,
   return true;
 }
 
-/* if PATH_REQUIRED == false : extracts and removes the host and port from a url
- *    formatted as [host(:port)] and returns true; otherwise returns false if no
- *    'host(:port)' is found
- * if PATH_REQUIRED == true : extracts and removes the host and port from a url
- *    formatted as [host(:port)/path...] and returns true; otherwise returns
- *    false if no 'host(:port)/' is found */
+/* extracts and removes the host and port from a url formatted as [host(:port)]
+ * and returns true; otherwise returns false if no 'host(:port)' is found */
 bool extract_host_and_port(std::string& url, std::string& host,
   std::string& port, Parse_Error& err) {
   std::string host_delim = "/";
   std::size_t pos = url.find(host_delim);
-
-  if(pos == std::string::npos && PATH_REQUIRED) {
-    err = e_path;
-    return false;   // no '/' in 'host(:port)/...' found
-  }
 
   host = url.substr(0, pos);
   if(pos == std::string::npos) {
@@ -312,11 +297,10 @@ bool extract_host_and_port(std::string& url, std::string& host,
     url.erase(0, pos + host_delim.size());  // remaining url is path
   }
   trim(host);
-  if(host.length() <= 0 ) {
+  if(host.length() <= 0) {
     err = e_host;
     return false; // no host found
   }
-
   return extract_and_verify_port(host, port, err);
 }
 
@@ -336,47 +320,43 @@ bool extract_and_verify_http_prefix(std::string& url) {
   return is_match_caseins(valid_http_prefix, http_prefix);
 }
 
-/* accepts a host (and port) formatted as 'host' or 'host:port', respectively,
+/* accepts a host and port formatted as 'host' or 'host:port', respectively,
  * assigns each to the appropriate variable, assigns default port number if none
  * is present, and returns true; otherwise returns false for an invalid port */
 bool extract_and_verify_port(std::string& host, std::string& port,
     Parse_Error& err) {
   std::string port_delim = ":";
-  std::string default_port = DEFAULT_PORT;
   std::size_t pos = host.find(port_delim);
 
   // if no port included, assign default port
   if(pos == std::string::npos) {
-    port = default_port;
-    return true;
+    port = DEFAULT_PORT;
+    return true;  // host retains full value
   }
 
   // if port included, divide from host
   port = host.substr(pos + port_delim.size());
   host = host.substr(0, pos);
-
+  printf("!!!!!!!!!!!!!!!!!!!     %s\n      !!!!!!!!!!!!!!!!!!!!!!!!!!!", port.c_str());  // TODO: delete
   if(!verify_port(port)) {
     err = e_port;
     return false;
   }
-
   return true;
 }
 
 /* verifies that method is accepted (only GET in this assignment) and formatted
  * in uppercase; otherwise returns false on mismatch */
 bool verify_method(std::string& method) {
-  std::string valid_method = VALID_METHOD;
   trim(method);
-  return is_match_caseins(valid_method, method);
+  return is_match_caseins(VALID_METHOD, method);
 }
 
 /* verifies that the HTTP version is accepted (only HTTP/1.0 in this assignment)
  * and formatted in uppercase; otherwise returns false on mismatch */
 bool verify_http_vers(std::string& http_vers) {
-  std::string valid_http_vers = VALID_HTTP_VERS;
   trim(http_vers);
-  return is_match_caseins(valid_http_vers, http_vers);
+  return is_match_caseins(VALID_HTTP_VERS, http_vers);
 }
 
 /* returns true if each header has valid format [name: value] where name has no
@@ -387,7 +367,8 @@ bool verify_headers(std::vector<std::string> &headers, Parse_Error& err) {
   std::size_t pos = 0;
   std::string name_delim = ":";
   std::string whitespace = " \r\n\t";
-  std::string def_host = "Host", def_conn = "Connection", def_pc_temp = "Proxy-Connection"; // TODO: should only need first two
+  // std::string def_host = "Host", def_conn = "Connection";  // TODO: per Z - should only need these
+  std::string def_host = "Host", def_conn = "Connection", def_pc = "Proxy-Connection";  // TODO: Matt found another one
   std::vector<int> dup_headers_found;
 
   std::string orig_header, name, value;
@@ -420,7 +401,8 @@ bool verify_headers(std::vector<std::string> &headers, Parse_Error& err) {
     headers.at(i) = name + value;
 
     // track indices of headers with names: 'Host' and/or 'Connection'
-    if(is_match_caseins(def_host, name) || is_match_caseins(def_conn, name) || is_match_caseins(def_pc_temp, name)) {
+    // if(is_match_caseins(def_host, name) || is_match_caseins(def_conn, name)) {
+    if(is_match_caseins(def_host, name) || is_match_caseins(def_conn, name) || is_match_caseins(def_pc, name)) {
       dup_headers_found.push_back(i);
     }
   }
@@ -430,7 +412,6 @@ bool verify_headers(std::vector<std::string> &headers, Parse_Error& err) {
   for(std::vector<int>::reverse_iterator rit = dup_headers_found.rbegin();
       rit != dup_headers_found.rend(); ++rit) {
     headers.erase(headers.begin() + *rit);
-    // headers.erase(*rit);
   }
 
   return true;

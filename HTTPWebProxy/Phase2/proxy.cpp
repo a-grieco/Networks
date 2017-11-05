@@ -39,35 +39,24 @@ const int STANDARD_PORT = 80;
 const int MAX_BLANK_RECVS = 3;  // max consecutive 0 bytes recv() allowed
 
 const int DEFAULT_PORT_NUMBER = 10042;
-const int CONNECTIONS_ALLOWED = 30;    // TODO change to 30?
-const int MAX_THREADS_SUPPORTED = 30;  // TODO change to 30.
-                                      // note: is approximate, possible thread
-                                      // count may fluctuate-> count decremented
-                                      // just before pthread exits (could create
-                                      // new thread in overlap - s/b ok)
-const int MAX_SLEEP_SECONDS = 5;      // max time to wait before attempting to
-                                      // create a new thread
+
+const int CONNECTIONS_ALLOWED = 30;
+const int MAX_THREADS_SUPPORTED = 30;
+
+const int MAX_SLEEP_SECONDS = 5;  // wait before attempt to create thread
 
 const int BUFFERSIZE = 10000;
-const int MAXDATASIZE = 100000;     // max size of client HTTP request
+const int MAXDATASIZE = 100000; // max size of client HTTP request
 
-// TODO: testing - recongnize socket disconnects to manage error prints etc.
-// TODO: we should kick out clients who are inactive for 10+ seconds if possible
-// TODO: read up on the -1 initializer for thread_count
-// TODO: what is up with CONNECTIONS_ALLOWED?
-
-void check_state_temp(int& ret, int& state); // TODO: DELETE ME! - or fix me
+enum Proxy_Error { e_read_req, e_serv_connect, e_serv_send, e_serv_recv,
+  e_tout_recv_req, e_tout_recv_req_body };
 
 int thread_count = -1;  // initial connection brings count to 0
 pthread_mutex_t count_mutex = PTHREAD_MUTEX_INITIALIZER;
-
 void decrement_thread_count();
 bool increment_thread_count_successful();
 
 void* thread_connect (void * new_sockfd_ptr);
-
-enum Proxy_Error { e_read_req, e_serv_connect, e_serv_send, e_serv_recv,
-  e_tout_recv_req, e_tout_recv_req_body };
 
 bool port_number_is_valid(int& port_int, int port_number_arg);
 void set_port_number(char* port_buf, int port_int);
@@ -115,20 +104,6 @@ int main(int argc, char * argv[]) {
   };
   if(DEBUG_MODE) { printf("Proxy listening for connections...\n"); }
 
-  // set threads to be detached (able to exit without joining)
-  // pthread_attr_t attr;
-  // int ret;
-  // int state;  // TODO: remove if state check eliminated
-  // if((ret = pthread_attr_init(&attr))) {
-  //   printf("error %d: pthread_attr_init()\n", ret);
-  //   exit(EXIT_FAILURE);
-  // }
-  // if((ret = pthread_attr_setdetachstate(&attr, PTHREAD_CREATE_DETACHED))) {
-  //   printf("error %d: pthread_attr_setdetachstate()\n", ret);
-  //   exit(EXIT_FAILURE);
-  // }
-
-  // TODO: try placing just after main if not working here
   signal(SIGPIPE, SIG_IGN); // ignore errors that cause proxy to shut down
 
   // accept incoming connections
@@ -148,11 +123,6 @@ int main(int argc, char * argv[]) {
      std::this_thread::sleep_for(std::chrono::seconds(sleep_seconds));
     }
 
-    // TODO: begin DELETE ME! (fix or remove this check)
-    // ret = pthread_attr_getdetachstate(&attr, &state);
-    // check_state_temp(ret, state); // TODO: DELETE ME!
-    // TODO: end DELETE ME!
-
     new_sockfd = accept(client_sockfd, (struct sockaddr *)&client_addr,
       &addr_size);
     if(new_sockfd == -1) {
@@ -162,39 +132,19 @@ int main(int argc, char * argv[]) {
 
     int err;
     pthread_t thread_id;
-    if(DEBUG_MODE) { printf("Creating thread...\n"); }
     if((err = pthread_create(&thread_id, NULL, thread_connect, &new_sockfd))) {
       printf("Thread creation failed: %s\n", err);
       close(new_sockfd);
     }
-
     if(pthread_detach(thread_id) != 0) {
       perror("pthread_detach");
     }
   }
 
-  // pthread_attr_destroy(&attr);  // code should not reach this point
-                                // (detached attr reused for all threads)
   signal(SIGTERM, clean_exit);
   signal(SIGINT, clean_exit);
 
   return 0;
-}
-
-// TODO: DELETE ME! - or fix me (can turn this into a reset) but if it is a
-// problem; better move the set attribute into the loop & exit thread on fail
-void check_state_temp(int& ret, int& state) {
-  if(ret != 0) { printf("DETACH STATE err %d************************\n", ret); }
-  switch(state) {
-    case PTHREAD_CREATE_DETACHED:
-      break;      // detached state ok
-    case PTHREAD_CREATE_JOINABLE:
-      printf("JOINABLE STATE **********************************************\n");
-      break;
-    default:
-      printf("THREAD STATE BROKEN *****************************************\n");
-      break;
-  }
 }
 
 /* Decrements the thread count atomically */
@@ -232,7 +182,6 @@ bool increment_thread_count_successful() {
 void* thread_connect (void * new_sockfd_ptr) {
   int new_sockfd = *((int*) new_sockfd_ptr);
   int webserv_sockfd;
-  if(DEBUG_MODE) { printf("thread created...\n"); }
   std::string req_headers, body, webserv_host, webserv_port, data;
   if(!get_msg_from_client(new_sockfd, req_headers, body)) {
     close(new_sockfd);
@@ -240,13 +189,14 @@ void* thread_connect (void * new_sockfd_ptr) {
     pthread_exit(NULL);
   }
 
-  if(DEBUG_MODE && !body.empty()) {
-    printf("BODY PASSED TO THREAD_CONNECT: %s\n", body.c_str());
-  }
-
   // if parse fails, send error message ('data') and close client connection
   if(!get_parsed_data(req_headers, webserv_host, webserv_port, data)) {
-    if(DEBUG_MODE) { printf("client error message:\n%s\n", data.c_str()); }
+    if(DEBUG_MODE) {
+      printf("+++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++\n");
+      printf("parse error message:\n%s\n", data.c_str());
+      printf("received: %s\n", req_headers.c_str());
+      printf("+++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++\n");
+    }
     send_error_to_client(new_sockfd, data);
     close(new_sockfd);
     decrement_thread_count();
@@ -265,11 +215,15 @@ void* thread_connect (void * new_sockfd_ptr) {
 
   // connection to web server successful, send 'data' and body if present
   if(!body.empty()) { data += body; }
-  if(DEBUG_MODE) { printf("web server request:\n%s", data.c_str()); }
-  int length = data.length();
+  if(DEBUG_MODE) {
+    printf("......................web server request.......................\n");
+    printf("%s", data.c_str());
+    printf("...............................................................\n");
+   }
 
+  int length = data.length();
   if(send_all(webserv_sockfd, (char*)data.c_str(), &length) == -1) {
-    perror("send_all");
+    perror("Sending HTTP request to web server.\n\tsend_all");
     if(DEBUG_MODE) {
       printf("%d bytes of HTTP request sent to web server.\n", length);
     }
@@ -360,12 +314,10 @@ void create_and_bind_to_socket(int& client_sockfd, const char* port_buf) {
 bool get_msg_from_client(int client_sockfd, std::string& req_header_mssg,
   std::string& body_mssg) {
 
-  if(DEBUG_MODE) { printf("\nRetrieving message...\n"); }
-  // struct timeval start, current;
-  // double seconds_passed;
-  // if(PREEMPT_EXIT) { gettimeofday(&start, NULL); }
+  //if(DEBUG_MODE) { printf("\nRetrieving message...\n"); }
 
   int numbytes = 0, totalbytes = 0, totalbytes_needed = 0;
+  int num_bytes_req_headers = 0, num_bytes_body = 0;
 
   char mssg_buf[BUFFERSIZE];
   char fullmssg_buf[MAXDATASIZE];
@@ -384,59 +336,56 @@ bool get_msg_from_client(int client_sockfd, std::string& req_header_mssg,
   // retrieve request and optional header lines from client HTTP request
   while(!message_complete) {
     if((numbytes = recv(client_sockfd, mssg_buf, BUFFERSIZE-1, 0)) == -1) {
-      perror("recv");
-      if(DEBUG_MODE) { printf("Getting HTTP request from client.\n"); }
+      perror("Getting HTTP request from client.\n\trecv");
       return false;
     }
-    if(numbytes == 0) { // check for closed TCP connection
+    if(numbytes == 0) { // closed TCP connection
       message_complete = true;
+      continue;
     }
-    else {
-      totalbytes += numbytes;
-      strcat(fullmssg_buf, mssg_buf);
-      if(DEBUG_MODE) {
-        mssg_buf[numbytes] = '\0';
-        printf("%s", mssg_buf);
-      }
-      memset(mssg_buf, 0, sizeof mssg_buf);
-      // check for end of message marker
-      full_mssg = std::string(fullmssg_buf);
-      if(!end_detected) {
-        end_detected =
-          req_header_end_detected(full_mssg, mssg_end_used, mssg_end_found);
-        if(end_detected) {
-          size_t header_found = full_mssg.find(HTTP_BODY_HEADER);
-          body_detected = header_found != std::string::npos;
-          if(body_detected) {
-            int num_bytes_req_headers = mssg_end_found + mssg_end_used.size();
-            int num_bytes_body = get_bytes_in_body(full_mssg, header_found);
-            totalbytes_needed = num_bytes_req_headers + num_bytes_body;
-          }
-        } // else, !end_detected (will check if detected in next loop)
-      }
-      if(end_detected) {  // end_detected == true
-        if(totalbytes >= totalbytes_needed) {
-          message_complete = true;
+    totalbytes += numbytes;
+    strcat(fullmssg_buf, mssg_buf);
+    // if(DEBUG_MODE) {
+    //   mssg_buf[numbytes] = '\0';
+    //   printf("%s", mssg_buf);
+    // }
+    memset(mssg_buf, 0, sizeof mssg_buf);
+    // check for end of message marker
+    full_mssg = std::string(fullmssg_buf);
+    if(!end_detected) {
+      end_detected =
+        req_header_end_detected(full_mssg, mssg_end_used, mssg_end_found);
+      if(end_detected) {
+        num_bytes_req_headers = mssg_end_found + mssg_end_used.size();
+        size_t header_found = full_mssg.find(HTTP_BODY_HEADER);
+        body_detected = header_found != std::string::npos;
+        if(body_detected) {
+          num_bytes_body = get_bytes_in_body(full_mssg, header_found);
+          totalbytes_needed = num_bytes_req_headers + num_bytes_body;
         }
+      } // else, !end_detected (will check if detected in next loop)
+    }
+    if(end_detected) {  // end_detected == true
+      if(totalbytes >= totalbytes_needed) {
+        message_complete = true;
       }
     }
   } // message_complete
-  if(DEBUG_MODE) { printf("...message complete\n"); }
+  //if(DEBUG_MODE) { printf("...message complete\n"); }
 
-  // find end of request/header lines (and start of body if applicable)
-  int mssg_break = mssg_end_found + mssg_end_used.size();
+  // assign values for request/header lines and body
+  req_header_mssg = full_mssg.substr(0, num_bytes_req_headers);
+  if(num_bytes_req_headers <= full_mssg.size()) {
+    body_mssg = full_mssg.substr(num_bytes_req_headers);
+  }
 
-  req_header_mssg = full_mssg.substr(0, mssg_break);
-  printf("ANYTHING MISSING in req/headers?\n[%s]\n", req_header_mssg.c_str());
-  if(req_header_mssg.find(mssg_end_used) == std::string::npos) {
-    printf("YOUR COUNTING IS OFF HERE!!!\n");
+  if(!body_mssg.empty()) {
+    printf("***************************************************************\n");
+    printf("                         BODY FOUND\n");
+    printf("_______________________________________________________________\n");
+    printf("%s\n", body_mssg.c_str());
+    printf("***************************************************************\n");
   }
-  // assign body if present
-  if(mssg_break <= full_mssg.size()) {
-    body_mssg = full_mssg.substr(mssg_break);
-    printf("ANYTHING MISSING in body?\n[%s]\n", body_mssg.c_str());
-  }
-  if(body_mssg.empty()) { printf("EMPTY BODY OK\n"); }
 
   return true;
 }
@@ -536,8 +485,7 @@ bool send_webserver_data_to_client(int webserv_sockfd, int new_sockfd) {
 
   while(!message_completed) {
     if((numbytes = recv(webserv_sockfd, mssg_buf, BUFFERSIZE-1, 0)) == -1) {
-      perror("recv");
-      if(DEBUG_MODE) { printf("Retrieving data from web server.\n"); }
+      perror("Retrieving data from web server.\n\trecv");
       Proxy_Error err = e_serv_recv;
       send_error_to_client(new_sockfd, err);
       return false;
@@ -549,7 +497,7 @@ bool send_webserver_data_to_client(int webserv_sockfd, int new_sockfd) {
       mssg_buf[numbytes] = '\0';
       int length = strlen(mssg_buf);
       if(send_all(new_sockfd, mssg_buf, &length) == -1) {
-        perror("send_all");
+        perror("Sending web server data to client.\n\tsend_all");
         if(DEBUG_MODE) { printf("%d bytes server data -> client.\n", length); }
         return false;
       }
@@ -570,7 +518,7 @@ void send_error_to_client(int& client_sockfd, std::string& parse_err) {
   error_msg += "\n";
   int length = error_msg.length();
   if(send_all(client_sockfd, (char*)error_msg.c_str(), &length) == -1) {
-    perror("send_all");
+    perror("Sending error message to client.\n\tsend_all");
     if(DEBUG_MODE) {
       printf("%d bytes of error message sent to client.\n", length);
     }
@@ -585,7 +533,7 @@ void send_error_to_client(int& client_sockfd, Proxy_Error& err) {
   error_msg += "\n";
   int length = error_msg.length();
   if(send_all(client_sockfd, (char*)error_msg.c_str(), &length) == -1) {
-    perror("send_all");
+    perror("Sending error message to client.\n\tsend_all");
     if(DEBUG_MODE) {
       printf("%d bytes of error message sent to client.\n", length);
     }
