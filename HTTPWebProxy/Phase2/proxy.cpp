@@ -41,7 +41,7 @@ const int MAX_BLANK_RECVS = 3;  // max consecutive 0 bytes recv() allowed
 const int DEFAULT_PORT_NUMBER = 10042;
 
 const int CONNECTIONS_ALLOWED = 30;
-const int MAX_THREADS_SUPPORTED = 30;
+const int MAX_THREADS_SUPPORTED = 10;
 
 const int MAX_SLEEP_SECONDS = 5;  // wait before attempt to create thread
 
@@ -180,16 +180,46 @@ bool increment_thread_count_successful() {
 /* When successful, enables a thread to connect to a webserver, request data,
  * and return that data to a client. If unsuccessful, sends error to client. */
 void* thread_connect (void * new_sockfd_ptr) {
+  /* TODO: remove - for testing */
+  struct timeval start, current;
+  double seconds_passed;
+  gettimeofday(&start, NULL);
+  /* TODO: remove after testing */
+
+
   int new_sockfd = *((int*) new_sockfd_ptr);
   int webserv_sockfd;
   std::string req_headers, body, webserv_host, webserv_port, data;
   if(!get_msg_from_client(new_sockfd, req_headers, body)) {
     close(new_sockfd);
     decrement_thread_count();
+    /* TODO: remove after testing */
+    gettimeofday(&current, NULL); // TODO: remove
+    seconds_passed = (current.tv_sec - start.tv_sec);
+    if(seconds_passed > 10) {
+      printf("_timer_timer_timer_timer_timer_timer_timer_timer_timer_timer_timer_\n");
+      printf("!get_msg_from_client exited after %f seconds\n", seconds_passed);
+      printf("_timer_timer_timer_timer_timer_timer_timer_timer_timer_timer_timer_\n");
+    }
+    /* TODO: remove after testing */
     pthread_exit(NULL);
   }
 
   // if parse fails, send error message ('data') and close client connection
+  if(req_headers.size() < strlen("http://x/")) {
+    close(new_sockfd);
+    decrement_thread_count();
+    /* TODO: remove after testing */
+    gettimeofday(&current, NULL); // TODO: remove
+    seconds_passed = (current.tv_sec - start.tv_sec);
+    if(seconds_passed > 10) {
+      printf("_timer_timer_timer_timer_timer_timer_timer_timer_timer_timer_timer_\n");
+      printf("req_headers.size() < xxx exited after %f seconds\n", seconds_passed);
+      printf("_timer_timer_timer_timer_timer_timer_timer_timer_timer_timer_timer_\n");
+    }
+    /* TODO: remove after testing */
+    pthread_exit(NULL);
+  }
   if(!get_parsed_data(req_headers, webserv_host, webserv_port, data)) {
     if(DEBUG_MODE) {
       printf("+++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++\n");
@@ -231,6 +261,15 @@ void* thread_connect (void * new_sockfd_ptr) {
     send_error_to_client(new_sockfd, err);
     close(new_sockfd);
     decrement_thread_count();
+    /* TODO: remove after testing */
+    gettimeofday(&current, NULL); // TODO: remove
+    seconds_passed = (current.tv_sec - start.tv_sec);
+    if(seconds_passed > 10) {
+      printf("_timer_timer_timer_timer_timer_timer_timer_timer_timer_timer_timer_\n");
+      printf("HTTP request to web server exited after %f seconds\n", seconds_passed);
+      printf("_timer_timer_timer_timer_timer_timer_timer_timer_timer_timer_timer_\n");
+    }
+    /* TODO: remove after testing */
     pthread_exit(NULL);
   }
 
@@ -243,6 +282,15 @@ void* thread_connect (void * new_sockfd_ptr) {
 
   close(new_sockfd);  // release client, transaction successful
   decrement_thread_count();
+  /* TODO: remove after testing */
+  gettimeofday(&current, NULL); // TODO: remove
+  seconds_passed = (current.tv_sec - start.tv_sec);
+  if(seconds_passed > 10) {
+    printf("_timer_timer_timer_timer_timer_timer_timer_timer_timer_timer_timer_\n");
+    printf("data: %s exited after %f seconds\n", data.c_str(), seconds_passed);
+    printf("_timer_timer_timer_timer_timer_timer_timer_timer_timer_timer_timer_\n");
+  }
+  /* TODO: remove after testing */
   pthread_exit(NULL);
 }
 
@@ -313,6 +361,12 @@ void create_and_bind_to_socket(int& client_sockfd, const char* port_buf) {
  * the message with two repeating newlines ('\r\n\r\n' or '\n\n') */
 bool get_msg_from_client(int client_sockfd, std::string& req_header_mssg,
   std::string& body_mssg) {
+
+    /* TODO: remove - for testing */
+    struct timeval start, current;
+    double seconds_passed;
+    gettimeofday(&start, NULL);
+    /* TODO: remove after testing */
 
   //if(DEBUG_MODE) { printf("\nRetrieving message...\n"); }
 
@@ -387,6 +441,16 @@ bool get_msg_from_client(int client_sockfd, std::string& req_header_mssg,
     printf("***************************************************************\n");
   }
 
+  /* TODO: remove after testing */
+  gettimeofday(&current, NULL); // TODO: remove
+  seconds_passed = (current.tv_sec - start.tv_sec);
+  if(seconds_passed > 10) {
+    printf("_timer_timer_timer_timer_timer_timer_timer_timer_timer_timer_timer_\n");
+    printf("get_msg_from_client completed after %f seconds\n", seconds_passed);
+    printf("_timer_timer_timer_timer_timer_timer_timer_timer_timer_timer_timer_\n");
+  }
+  /* TODO: remove after testing */
+
   return true;
 }
 
@@ -449,7 +513,10 @@ bool connect_to_web_server(std::string webserv_host, std::string webserv_port,
       gettimeofday(&current, NULL);
       seconds_passed = (current.tv_sec - start.tv_sec);
       if(seconds_passed > MAX_SECONDS_TO_WAIT) {
+        printf("_timer_timer_timer_timer_timer_timer_timer_timer_timer_timer_timer_\n");  //TODO remove timer banners
         if(DEBUG_MODE) { printf("exited after %f seconds\n", seconds_passed); }
+        printf("_timer_timer_timer_timer_timer_timer_timer_timer_timer_timer_timer_\n");
+
         return false; // failed to connect within time limit
       }
     }
@@ -477,6 +544,13 @@ bool connect_to_web_server(std::string webserv_host, std::string webserv_port,
 
 /* Reads a message from a socket and sends it to a client */
 bool send_webserver_data_to_client(int webserv_sockfd, int new_sockfd) {
+
+  /* TODO: remove - for testing */
+  struct timeval start, current;
+  double seconds_passed;
+  gettimeofday(&start, NULL);
+  /* TODO: remove after testing */
+
   int numbytes;
   char mssg_buf[BUFFERSIZE];
   memset(mssg_buf, 0, sizeof mssg_buf);
@@ -504,6 +578,17 @@ bool send_webserver_data_to_client(int webserv_sockfd, int new_sockfd) {
       memset(mssg_buf, 0, sizeof mssg_buf);
     }
   }
+
+  /* TODO: remove after testing */
+  gettimeofday(&current, NULL); // TODO: remove
+  seconds_passed = (current.tv_sec - start.tv_sec);
+  if(seconds_passed > 10) {
+    printf("_timer_timer_timer_timer_timer_timer_timer_timer_timer_timer_timer_\n");
+    printf("send_webserver_data_to_client completed after %f seconds\n", seconds_passed);
+    printf("_timer_timer_timer_timer_timer_timer_timer_timer_timer_timer_timer_\n");
+  }
+  /* TODO: remove after testing */
+
   return message_completed;
 }
 
