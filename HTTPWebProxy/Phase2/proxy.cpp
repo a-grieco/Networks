@@ -73,14 +73,17 @@ bool port_number_is_valid(int& port_int, int port_number_arg);
 void set_port_number(char* port_buf, int port_int);
 
 void create_and_bind_to_socket(int& client_sockfd, const char* port_buf);
-bool get_msg_from_client(int client_sockfd, std::string& client_msg,
-  bool& body_found, char (&body_buf)[BUFFERSIZE]);
+bool get_msg_from_client(int client_sockfd, std::string& req_header_mssg,
+  std::string& body_msg);
 bool connect_to_web_server(std::string webserv_host, std::string webserv_port,
     int& webserv_sockfd);
 bool send_webserver_data_to_client(int webserv_sockfd, int new_sockfd);
 void send_error_to_client(int& client_sockfd, std::string& parse_err);
 void send_error_to_client(int& client_sockfd, Proxy_Error& err);
 
+bool req_header_end_detected(std::string& msg, std::string& end_used,
+  size_t& msg_end_found);
+int get_bytes_in_body(std::string& msg, size_t msg_end);
 void get_proxy_error_msg(std::string msg, Proxy_Error& err);
 int send_all(int socket, char *data_buf, int *length);
 void clean_exit(int flag);
@@ -230,30 +233,26 @@ void* thread_connect (void * new_sockfd_ptr) {
   int new_sockfd = *((int*) new_sockfd_ptr);
   int webserv_sockfd;
   if(DEBUG_MODE) { printf("thread created...\n"); }
-  std::string client_msg, webserv_host, webserv_port, data;
-  bool body_found;
-  char body[BUFFERSIZE];
-  if(!get_msg_from_client(new_sockfd, client_msg, body_found, body)) {
+  std::string req_headers, body, webserv_host, webserv_port, data;
+  if(!get_msg_from_client(new_sockfd, req_headers, body)) {
     close(new_sockfd);
     decrement_thread_count();
     pthread_exit(NULL);
   }
 
-  if(DEBUG_MODE && body_found) {
-    printf("BODY PASSED TO THREAD_CONNECT: %s\n", body);
+  if(DEBUG_MODE && !body.empty()) {
+    printf("BODY PASSED TO THREAD_CONNECT: %s\n", body.c_str());
   }
 
   // if parse fails, send error message ('data') and close client connection
-  if(!get_parsed_data(client_msg, webserv_host, webserv_port, data)) {
+  if(!get_parsed_data(req_headers, webserv_host, webserv_port, data)) {
     if(DEBUG_MODE) { printf("client error message:\n%s\n", data.c_str()); }
     send_error_to_client(new_sockfd, data);
     close(new_sockfd);
     decrement_thread_count();
     pthread_exit(NULL);
   }
-
   // parsing successful; generated HTTP request ('data') received
-  if(DEBUG_MODE) { printf("web server request:\n%s", data.c_str()); }
 
   // connect to web server or send error to and close client connection
   if(!connect_to_web_server(webserv_host, webserv_port, webserv_sockfd)) {
@@ -264,9 +263,11 @@ void* thread_connect (void * new_sockfd_ptr) {
     pthread_exit(NULL);
   }
 
-  // connection to web server successful, send 'data' request to web server
-  if(body_found) { data += std::string(body); } // TODO: is this conversion acceptable for binary
-  int length = data.length();                   // if so, stick with passing the body as a string
+  // connection to web server successful, send 'data' and body if present
+  if(!body.empty()) { data += body; }
+  if(DEBUG_MODE) { printf("web server request:\n%s", data.c_str()); }
+  int length = data.length();
+
   if(send_all(webserv_sockfd, (char*)data.c_str(), &length) == -1) {
     perror("send_all");
     if(DEBUG_MODE) {
@@ -356,186 +357,122 @@ void create_and_bind_to_socket(int& client_sockfd, const char* port_buf) {
 
 /* Receives HTTP message from client and returns as a string; marks the end of
  * the message with two repeating newlines ('\r\n\r\n' or '\n\n') */
-bool get_msg_from_client(int client_sockfd, std::string& client_msg,
-  bool& body_found, char (&body_buf)[BUFFERSIZE]) {
+bool get_msg_from_client(int client_sockfd, std::string& req_header_mssg,
+  std::string& body_mssg) {
 
+  if(DEBUG_MODE) { printf("\nRetrieving message...\n"); }
   // struct timeval start, current;
   // double seconds_passed;
   // if(PREEMPT_EXIT) { gettimeofday(&start, NULL); }
 
-  int numbytes = 0, totalbytes = 0;
+  int numbytes = 0, totalbytes = 0, totalbytes_needed = 0;
 
   char mssg_buf[BUFFERSIZE];
   char fullmssg_buf[MAXDATASIZE];
   memset(mssg_buf, 0, sizeof mssg_buf);
   memset(fullmssg_buf, 0, sizeof fullmssg_buf);
-  memset(body_buf, 0, sizeof body_buf);
 
   std::string full_mssg;
-  std::string req_header_mssg;
-  std::string body_mssg;
-  std::string req_header_mssg_end = "\r\n\r\n"; // cr lf = standard
-  std::string alt_req_header_mssg_end = "\n\n"; // gracefully handle lf only
   std::string mssg_end_used;
-  std::size_t found, mssg_end_found;
 
-  body_found = false;
+  bool end_detected = false;  // recognize end of req/headers
+  bool body_detected = false;
   bool message_complete = false;
-  bool req_header_complete = false;
 
-  // TODO: check if fixed: to detect an endless, errorless, dataless recv()
-  int err_detect_count = 0; // # consecutive recv() w/ numbytes = 0
+  size_t mssg_end_found;
 
-  if(DEBUG_MODE) { printf("\nRetrieving message...\n"); }
   // retrieve request and optional header lines from client HTTP request
-  while(!req_header_complete) {
+  while(!message_complete) {
     if((numbytes = recv(client_sockfd, mssg_buf, BUFFERSIZE-1, 0)) == -1) {
       perror("recv");
       if(DEBUG_MODE) { printf("Getting HTTP request from client.\n"); }
       return false;
     }
-    totalbytes += numbytes;
-    strcat(fullmssg_buf,mssg_buf);
-    full_mssg += std::string(mssg_buf);
-    if(DEBUG_MODE) {
-      mssg_buf[numbytes] = '\0';
-      printf("   %s", mssg_buf);
-    }
-    memset(mssg_buf, 0, sizeof mssg_buf);
-
-    // check if request and header lines received
-    if(numbytes > 0) {
-      mssg_end_found = full_mssg.find(req_header_mssg_end);
-      mssg_end_used = req_header_mssg_end;
-      if(mssg_end_found == std::string::npos) {
-        mssg_end_found = full_mssg.find(alt_req_header_mssg_end);
-        mssg_end_used = alt_req_header_mssg_end;
-      }
-      if(mssg_end_found != std::string::npos) {
-        req_header_complete = true;
-      }
-      err_detect_count = 0;
+    if(numbytes == 0) { // check for closed TCP connection
+      message_complete = true;
     }
     else {
-      ++err_detect_count;
-    }
-    if(err_detect_count >= MAX_BLANK_RECVS) {
+      totalbytes += numbytes;
+      strcat(fullmssg_buf, mssg_buf);
       if(DEBUG_MODE) {
-        printf("%d STRIKES: get_msg_from_client, getting reqest & headers\n",
-                err_detect_count);
+        mssg_buf[numbytes] = '\0';
+        printf("%s", mssg_buf);
       }
-      return false;
-      // Proxy_Error err = e_tout_recv_req;
-      // send_error_to_client(client_sockfd, err);
-    }
-    // if(PREEMPT_EXIT) {
-    //   gettimeofday(&current, NULL);
-    //   seconds_passed = (current.tv_sec - start.tv_sec);
-    //   if(seconds_passed > MAX_SECONDS_TO_WAIT) {
-    //     if(DEBUG_MODE) {
-    //       printf("TIMEOUT: get_msg_from_client, getting reqest & headers\n");
-    //       printf("# consecutive recv() numbytes = 0: %d\n", err_detect_count);
-    //     }
-    //     Proxy_Error err = e_tout_recv_req;
-    //     send_error_to_client(client_sockfd, err);
-    //     return false; // failed to connect within time limit
-    //   }
-    // }
-  } // request line and headers received (at minimum)
-  req_header_mssg = full_mssg.substr(0, mssg_end_found+mssg_end_used.size()+1);
-
-  // check if body is included in client HTTP request (may need to recv more)
-  found = full_mssg.find(HTTP_BODY_HEADER);
-  if(found != std::string::npos) {
-    // header found that indicates size of body in bytes
-    printf("%s...\n", (full_mssg.substr(found, 30)).c_str()); // TODO: delete me
-    int num_bytes_in_body;
-    std::string num_bytes_start =
-      full_mssg.substr(found + HTTP_BODY_HEADER.size() + 1);
-    std::istringstream iss(num_bytes_start.substr(0, num_bytes_start.find('\n')));
-    iss >> num_bytes_in_body;
-    printf("# bytes: %d\n", num_bytes_in_body); // TODO: delete me
-    if(num_bytes_in_body > 0) {
-      printf("_______________________________________________________________\n");  // TODO: delete me
-      printf("***************************************************************\n");  // TODO: delete me
-      printf("///////////////////  BODY FOUND ///////////////////////////////\n");  // TODO: delete me
-
-      // check if full body has been received
-      int num_bytes_for_req_headers = mssg_end_found + mssg_end_used.size();
-      int bytes_for_full_mssg = num_bytes_for_req_headers + num_bytes_in_body;
-
-      if(totalbytes < bytes_for_full_mssg) {
-        // full body has not been retrieved from client yet
-        err_detect_count = 0;
-        int bytes_needed = bytes_for_full_mssg - totalbytes /*+ mssg_end_used.size()*/;
-        printf("bytes needed: %d\n", bytes_needed);
-        while(bytes_needed) {
-          if((numbytes = recv(client_sockfd, mssg_buf, BUFFERSIZE-1, 0)) == -1) {
-            perror("recv");
-            if(DEBUG_MODE) { printf("Getting HTTP request from client.\n"); }
-            return false;
+      memset(mssg_buf, 0, sizeof mssg_buf);
+      // check for end of message marker
+      full_mssg = std::string(fullmssg_buf);
+      if(!end_detected) {
+        end_detected =
+          req_header_end_detected(full_mssg, mssg_end_used, mssg_end_found);
+        if(end_detected) {
+          size_t header_found = full_mssg.find(HTTP_BODY_HEADER);
+          body_detected = header_found != std::string::npos;
+          if(body_detected) {
+            int num_bytes_req_headers = mssg_end_found + mssg_end_used.size();
+            int num_bytes_body = get_bytes_in_body(full_mssg, header_found);
+            totalbytes_needed = num_bytes_req_headers + num_bytes_body;
           }
-          totalbytes += numbytes;
-          strcat(fullmssg_buf,mssg_buf);
-          full_mssg += std::string(mssg_buf);
-          if(DEBUG_MODE) {
-            mssg_buf[numbytes] = '\0';
-            printf("   %s", mssg_buf);
-          }
-          memset(mssg_buf, 0, sizeof mssg_buf);
-          bytes_needed -= numbytes;
-          if(bytes_needed < 0) {  // TODO: remove check when verified
-            if(DEBUG_MODE) { printf("BYTE COUNTING %d\n", bytes_needed);
-                             printf("...do we require end-line cr lf?\n"); }
-            bytes_needed = 0;
-          }
-          if(numbytes == 0) {
-            ++err_detect_count;
-          }
-          else {
-            err_detect_count = 0;
-          }
-          if(err_detect_count >= MAX_BLANK_RECVS) {
-            if(DEBUG_MODE) {
-              printf("%d STRIKES: get_msg_from_client, getting missing body\n",
-                      err_detect_count);
-            }
-            Proxy_Error err = e_tout_recv_req_body;
-            send_error_to_client(client_sockfd, err);
-          }
-          // if(PREEMPT_EXIT) {
-          //   gettimeofday(&current, NULL);
-          //   seconds_passed = (current.tv_sec - start.tv_sec);
-          //   if(seconds_passed > MAX_SECONDS_TO_WAIT) {
-          //     if(DEBUG_MODE) {
-          //       printf("TIMEOUT: get_msg_from_client, getting missing body\n");
-          //       printf("# consecutive recv() numbytes = 0: %d\n", err_detect_count);
-          //     }
-          //     Proxy_Error err = e_tout_recv_req_body;
-          //     send_error_to_client(client_sockfd, err);
-          //     return false; // failed to connect within time limit
-          //   }
-          // }
+        } // else, !end_detected (will check if detected in next loop)
+      }
+      if(end_detected) {  // end_detected == true
+        if(totalbytes >= totalbytes_needed) {
+          message_complete = true;
         }
       }
-      // client message received in full (request, header lines, and body)
-      body_mssg = full_mssg.substr(num_bytes_for_req_headers);
-      strncpy(body_buf, fullmssg_buf + num_bytes_for_req_headers,
-        num_bytes_in_body);
-      body_buf[num_bytes_in_body] = '\0';
-      body_found = true;
-      // TODO: test char[] vs strings for binary - guessing keeping char[] out of recv() is safest
-      printf("BODY:\n%s\n", body_buf);
-      printf("(string body: %s)\n", body_mssg.c_str());
-      printf("_______________________________________________________________\n");  // TODO: delete me
-      printf("***************************************************************\n");  // TODO: delete me
     }
-  }
-
+  } // message_complete
   if(DEBUG_MODE) { printf("...message complete\n"); }
-  client_msg = req_header_mssg;
-  // TODO: msg_body = ...
+
+  // find end of request/header lines (and start of body if applicable)
+  int mssg_break = mssg_end_found + mssg_end_used.size();
+
+  req_header_mssg = full_mssg.substr(0, mssg_break);
+  printf("ANYTHING MISSING in req/headers?\n[%s]\n", req_header_mssg.c_str());
+  if(req_header_mssg.find(mssg_end_used) == std::string::npos) {
+    printf("YOUR COUNTING IS OFF HERE!!!\n");
+  }
+  // assign body if present
+  if(mssg_break <= full_mssg.size()) {
+    body_mssg = full_mssg.substr(mssg_break);
+    printf("ANYTHING MISSING in body?\n[%s]\n", body_mssg.c_str());
+  }
+  if(body_mssg.empty()) { printf("EMPTY BODY OK\n"); }
+
   return true;
+}
+
+/* checks the client message received so far for an indication of the end of
+ * request and header lines and returns true if found or false if not */
+bool req_header_end_detected(std::string& msg, std::string& end_used,
+  size_t& msg_end_found) {
+  std::string req_header_mssg_end = "\r\n\r\n"; // cr lf = standard
+  std::string alt_req_header_mssg_end = "\n\n"; // gracefully handle lf only
+  msg_end_found = msg.find(req_header_mssg_end);
+  if(msg_end_found != std::string::npos) {
+    end_used = req_header_mssg_end;
+    return true;
+  }
+  msg_end_found = msg.find(alt_req_header_mssg_end);
+  if(msg_end_found != std::string::npos) {
+    end_used = alt_req_header_mssg_end;
+    return true;
+  }
+  return false;
+}
+
+/* accepts the client message and the beginning position of the HTTP_BODY_HEADER
+ * and returns the number of bytes in the body as indicated by the header */
+int get_bytes_in_body(std::string& msg, size_t header_start) {
+  int num_bytes_in_body;
+  // get past header name <HEADER NAME>: <HEADER VALUE>
+  std::string bytes_start = msg.substr(header_start + HTTP_BODY_HEADER.size());
+  // get past ":" ( varying spaces possible before/after)
+  size_t colon_found = bytes_start.find(":");
+  bytes_start = bytes_start.substr(colon_found + 1);
+  // <HEADER VALUE> indicates the number of bytes in the body
+  std::istringstream iss(bytes_start.substr(0, bytes_start.find('\n')));
+  iss >> num_bytes_in_body;
+  return num_bytes_in_body;
 }
 
 /* Establishes connection to client's requested web server */
@@ -607,21 +544,17 @@ bool send_webserver_data_to_client(int webserv_sockfd, int new_sockfd) {
     }
     if(numbytes == 0) {
       message_completed = true;
-      proxy_string = "\n";
     }
     else {
       mssg_buf[numbytes] = '\0';
-      proxy_string = mssg_buf;
-    }
-    int length = proxy_string.length();
-    if(send_all(new_sockfd, (char*)proxy_string.c_str(), &length) == -1) {
-      perror("send_all");
-      if(DEBUG_MODE) {
-        printf("%d bytes of web server data sent to client.\n", length);
+      int length = strlen(mssg_buf);
+      if(send_all(new_sockfd, mssg_buf, &length) == -1) {
+        perror("send_all");
+        if(DEBUG_MODE) { printf("%d bytes server data -> client.\n", length); }
+        return false;
       }
-      return false;
+      memset(mssg_buf, 0, sizeof mssg_buf);
     }
-    memset(mssg_buf, 0, sizeof mssg_buf);
   }
   return message_completed;
 }

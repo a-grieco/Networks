@@ -234,7 +234,8 @@ bool parse_url(std::string url, std::string& host, std::string& path,
 /* extracts each header line from 'msg' into an element in 'headers' and returns
  * true if headers are present; otherwise returns false */
 bool extract_headers(std::string msg, std::vector<std::string> &headers) {
-  std::string eol_delim = "\r\n";
+  std::string eol_delim = "\r\n";   // standard is cr lf
+  std::string alt_eol_delim = "\n"; // handle (non-standard) lf
   std::size_t pos = 0;
 
   if(msg.empty()) { return false; }
@@ -242,6 +243,9 @@ bool extract_headers(std::string msg, std::vector<std::string> &headers) {
   bool all_headers_extracted = false;
   while(!all_headers_extracted && !msg.empty()) {
     pos = msg.find(eol_delim);
+    if(pos == std::string::npos) {
+      pos = msg.find(alt_eol_delim);
+    }
     if(pos != std::string::npos) {
       if(pos > 0) {
         headers.push_back(msg.substr(0, pos));
