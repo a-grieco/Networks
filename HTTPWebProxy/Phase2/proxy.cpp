@@ -48,8 +48,7 @@ const int MAX_SLEEP_SECONDS = 5;  // wait before attempt to create thread
 const int BUFFERSIZE = 10000;
 const int BODY_BUFFERSIZE = 1000;
 
-enum Proxy_Error { e_read_req, e_serv_connect, e_serv_send, e_serv_recv,
-   e_empty_req };
+enum Proxy_Error { e_serv_connect, e_serv_send, e_serv_recv, e_empty_req };
 
 int thread_count = -1;  // initial connection brings count to 0
 pthread_mutex_t count_mutex = PTHREAD_MUTEX_INITIALIZER;
@@ -189,13 +188,6 @@ bool increment_thread_count_successful() {
  * and return that data to a client. If unsuccessful, sends error to client. */
 void* thread_connect (void * new_sockfd_ptr) {
 
-  /* TODO: remove - for testing */
-  struct timeval start, current;
-  double seconds_passed;
-  gettimeofday(&start, NULL);
-  /* TODO: remove after testing */
-
-
   int new_sockfd = *((int*) new_sockfd_ptr);
   int webserv_sockfd;
   std::string req_headers, body, webserv_host, webserv_port, data;
@@ -203,19 +195,6 @@ void* thread_connect (void * new_sockfd_ptr) {
   if(!get_msg_from_client(new_sockfd, req_headers, body_buf)) {
     close(new_sockfd);
     decrement_thread_count();
-
-    /* TODO: remove after testing */
-    if(DEBUG_MODE){
-    gettimeofday(&current, NULL); // TODO: remove
-    seconds_passed = (current.tv_sec - start.tv_sec);
-    if(seconds_passed > 10) {
-      printf("_timer_timer_timer_timer_timer_timer_timer_timer_timer_timer_timer_\n");
-      printf("!get_msg_from_client FAILED after %f seconds\n", seconds_passed);
-      printf("attemting to get req_headers: %s\n", req_headers.c_str());
-      printf("_timer_timer_timer_timer_timer_timer_timer_timer_timer_timer_timer_\n");
-    }}
-    /* TODO: remove after testing */
-
     pthread_exit(NULL);
     return NULL;
   }
@@ -252,17 +231,6 @@ void* thread_connect (void * new_sockfd_ptr) {
     send_error_to_client(new_sockfd, err);
     close(new_sockfd);
     decrement_thread_count();
-    /* TODO: remove after testing */
-    if(DEBUG_MODE){
-    gettimeofday(&current, NULL); // TODO: remove
-    seconds_passed = (current.tv_sec - start.tv_sec);
-    if(seconds_passed > 10) {
-      printf("_timer_timer_timer_timer_timer_timer_timer_timer_timer_timer_timer_\n");
-      printf("!connect_to_web_server exited after %f seconds\n", seconds_passed);
-      printf("HOST: %s, PORT: %s\n", webserv_host.c_str(), webserv_port.c_str());
-      printf("_timer_timer_timer_timer_timer_timer_timer_timer_timer_timer_timer_\n");
-    }}
-    /* TODO: remove after testing */
     pthread_exit(NULL);
     return NULL;
   }
@@ -275,28 +243,18 @@ void* thread_connect (void * new_sockfd_ptr) {
     strcat(webserv_req_buf, body_buf);
   }
   if(DEBUG_MODE) {
-    printf("STRING FORM............web server request.......................\n");
+    printf(".......................web server request.......................\n");
     printf("%s", webserv_req_buf);
     printf("................................................................\n");
   }
 
   int length = strlen(webserv_req_buf);
   if(send_all(webserv_sockfd, webserv_req_buf, &length) == -1) {
-    if(DEBUG_MODE) { perror("Sending HTTP request to web server.\n\tsend_all"); }
+    if(DEBUG_MODE) { perror("Sending HTTP request to server.\n\tsend_all"); }
     Proxy_Error err = e_serv_send;
     send_error_to_client(new_sockfd, err);
     close(new_sockfd);
     decrement_thread_count();
-    /* TODO: remove after testing */
-    if(DEBUG_MODE){
-    gettimeofday(&current, NULL); // TODO: remove
-    seconds_passed = (current.tv_sec - start.tv_sec);
-    if(seconds_passed > 10) {
-      printf("_timer_timer_timer_timer_timer_timer_timer_timer_timer_timer_timer_\n");
-      printf("HTTP request to web server exited after %f seconds\n", seconds_passed);
-      printf("_timer_timer_timer_timer_timer_timer_timer_timer_timer_timer_timer_\n");
-    }}
-    /* TODO: remove after testing */
     pthread_exit(NULL);
     return NULL;
   }
@@ -305,31 +263,11 @@ void* thread_connect (void * new_sockfd_ptr) {
   if(!send_webserver_data_to_client(webserv_sockfd, new_sockfd)) {
     close(new_sockfd);
     decrement_thread_count();
-
-    /* TODO: remove after testing */
-    if(DEBUG_MODE){
-    if(seconds_passed > 10) {
-      printf("_timer_timer_timer_timer_timer_timer_timer_timer_timer_timer_timer_\n");
-      printf("!send_webserver_data_to_client exited after %f seconds\n", seconds_passed);
-      printf("_timer_timer_timer_timer_timer_timer_timer_timer_timer_timer_timer_\n");
-    }}
-    /* TODO: remove after testing */
-
     pthread_exit(NULL);
   }
 
-  close(new_sockfd);  // release client, transaction successful
+  close(new_sockfd);  // release client, transaction complete
   decrement_thread_count();
-  /* TODO: remove after testing */
-  if(DEBUG_MODE){
-  gettimeofday(&current, NULL); // TODO: remove
-  seconds_passed = (current.tv_sec - start.tv_sec);
-  if(seconds_passed > 10) {
-    printf("_timer_success_timer_success_timer_success_timer_success_timer_\n");
-    printf("___SUCCESSFUL___ after %f seconds\n", data.c_str(), seconds_passed);
-    printf("_timer_success_timer_success_timer_success_timer_success_timer_\n");
-  }}
-  /* TODO: remove after testing */
   pthread_exit(NULL);
 }
 
@@ -401,14 +339,6 @@ void create_and_bind_to_socket(int& client_sockfd, const char* port_buf) {
 bool get_msg_from_client(int client_sockfd, std::string& req_header_mssg,
   char(&body_buf)[BODY_BUFFERSIZE]) {
 
-    /* TODO: remove - for testing */
-    struct timeval start, current;
-    double seconds_passed;
-    gettimeofday(&start, NULL);
-    /* TODO: remove after testing */
-
-  //if(DEBUG_MODE) { printf("\nRetrieving message...\n"); }
-
   int numbytes = 0, totalbytes = 0, totalbytes_needed = 0;
   int num_bytes_req_headers = 0, num_bytes_body = 0;
 
@@ -419,9 +349,9 @@ bool get_msg_from_client(int client_sockfd, std::string& req_header_mssg,
   memset(body_buf, 0, sizeof body_buf);
 
   std::string full_mssg;
-  std::string mssg_end_used;  // (standard cr-lf or just lf)
+  std::string mssg_end_used;  // (standard cr-lf or lf only)
 
-  bool end_detected = false;  // recognize end of req/headers
+  bool end_detected = false;  // recognize end of req/headers (mssg_end)
   bool body_detected = false;
   bool message_complete = false;
 
@@ -430,7 +360,7 @@ bool get_msg_from_client(int client_sockfd, std::string& req_header_mssg,
   // retrieve request and optional header lines from client HTTP request
   while(!message_complete) {
     if((numbytes = recv(client_sockfd, mssg_buf, BUFFERSIZE-1, 0)) == -1) {
-      perror("Getting HTTP request from client.\n\trecv");
+      if(DEBUG_MODE) { perror("Getting HTTP request from client.\n\trecv"); }
       return false;
     }
     if(numbytes == 0) { // closed TCP connection
@@ -438,15 +368,10 @@ bool get_msg_from_client(int client_sockfd, std::string& req_header_mssg,
       continue;
     }
     totalbytes += numbytes;
-    // mssg_buf[numbytes] = '\0';
-    // full_mssg += mssg_buf;
     strcat(fullmssg_buf, mssg_buf);
-    // if(DEBUG_MODE) {
-    //   mssg_buf[numbytes] = '\0';
-    //   printf("%s", mssg_buf);
-    // }
     memset(mssg_buf, 0, sizeof mssg_buf);
-    // check for end of message marker
+
+    // check for end of message marker if not yet detected
     full_mssg = std::string(fullmssg_buf);
     if(!end_detected) {
       end_detected =
@@ -459,52 +384,27 @@ bool get_msg_from_client(int client_sockfd, std::string& req_header_mssg,
           num_bytes_body = get_bytes_in_body(full_mssg, header_found);
           totalbytes_needed = num_bytes_req_headers + num_bytes_body;
         }
-      } // else, !end_detected (will check if detected in next loop)
+      } // else, end_detected == false (check again in next loop)
     }
     if(end_detected) {  // end_detected == true
       if(totalbytes >= totalbytes_needed) {
         message_complete = true;
       }
     }
-    /* TODO: remove after testing */
-    gettimeofday(&current, NULL); // TODO: remove
-    seconds_passed = (current.tv_sec - start.tv_sec);
-    if(seconds_passed > MAX_SECONDS_TO_WAIT && full_mssg.size() <= 0) {
-      printf("_timer_EXIT_timer_EXIT_timer_EXIT_timer_EXIT_timer_EXIT_timer_\n");
-      printf("get_msg_from_client EXITED after %f seconds\n", seconds_passed);
-      printf("data retrieved so far: %s\n", full_mssg.size());
-      printf("_timer_EXIT_timer_EXIT_timer_EXIT_timer_EXIT_timer_EXIT_timer_\n");
-      return false;
-    }
-    /* TODO: remove after testing */
-
   } // message_complete
 
   // assign values for request/header lines and body
   req_header_mssg = full_mssg.substr(0, num_bytes_req_headers);
   if(num_bytes_req_headers <= full_mssg.size()) {
-    if(num_bytes_body > BODY_BUFFERSIZE) { printf("\nNEED MORE ROOM IN BODY_BUF\n\n");}
     strncpy(body_buf, fullmssg_buf + num_bytes_req_headers, num_bytes_body);
   }
-
-  if(strlen(body_buf) > 0) {
+  if(DEBUG_MODE && strlen(body_buf) > 0) {
     printf("***************************************************************\n");
     printf("                         BODY FOUND\n");
     printf("_______________________________________________________________\n");
     printf("%s\n", body_buf);
     printf("***************************************************************\n");
   }
-
-  /* TODO: remove after testing */
-  gettimeofday(&current, NULL); // TODO: remove
-  seconds_passed = (current.tv_sec - start.tv_sec);
-  if(seconds_passed > 10) {
-    printf("_timer_timer_timer_timer_timer_timer_timer_timer_timer_timer_timer_\n");
-    printf("get_msg_from_client completed after %f seconds\n", seconds_passed);
-    printf("_timer_timer_timer_timer_timer_timer_timer_timer_timer_timer_timer_\n");
-  }
-  /* TODO: remove after testing */
-
   return true;
 }
 
@@ -553,7 +453,7 @@ bool connect_to_web_server(std::string webserv_host, std::string webserv_port,
 
   if((rv = getaddrinfo(webserv_host.c_str(), webserv_port.c_str(), &hints,
       &servinfo)) != 0) {
-    fprintf(stderr, "getaddrinfo: %s\n", gai_strerror(rv));
+    if(DEBUG_MODE) { fprintf(stderr, "getaddrinfo: %s\n", gai_strerror(rv)); }
     return false;
   }
   struct timeval start, current;
@@ -585,7 +485,7 @@ bool connect_to_web_server(std::string webserv_host, std::string webserv_port,
   }
 
   if(p == NULL) {   // p reached NULL with no connection
-    fprintf(stderr, "failed to connect\n");
+    if(DEBUG_MODE) { fprintf(stderr, "failed to connect to server\n"); }
     return false;
   }
 
@@ -596,24 +496,15 @@ bool connect_to_web_server(std::string webserv_host, std::string webserv_port,
 /* Reads a message from a socket and sends it to a client */
 bool send_webserver_data_to_client(int webserv_sockfd, int new_sockfd) {
 
-  /* TODO: remove - for testing */
-  struct timeval start, current;
-  double seconds_passed;
-  gettimeofday(&start, NULL);
-  /* TODO: remove after testing */
-
   int numbytes;
   char mssg_buf[BUFFERSIZE];
   memset(mssg_buf, 0, sizeof mssg_buf);
   std::string proxy_string;
   bool message_completed = false;
 
-  int count = 0;  // TODO: remove
-
   while(!message_completed) {
-    ++count;  // TODO: remove
     if((numbytes = recv(webserv_sockfd, mssg_buf, BUFFERSIZE-1, 0)) == -1) {
-      perror("Retrieving data from web server.\n\trecv");
+      if(DEBUG_MODE) { perror("Retrieving data from web server.\n\trecv"); }
       Proxy_Error err = e_serv_recv;
       send_error_to_client(new_sockfd, err);
       return false;
@@ -625,28 +516,12 @@ bool send_webserver_data_to_client(int webserv_sockfd, int new_sockfd) {
       mssg_buf[numbytes] = '\0';
       int length = strlen(mssg_buf);
       if(send_all(new_sockfd, mssg_buf, &length) == -1) {
-        perror("Sending web server data to client.\n\tsend_all");
-        if(DEBUG_MODE) { printf("%d bytes server data -> client.\n", length); }
+        if(DEBUG_MODE) { perror("Sending server data to client.\n\tsend_all"); }
         return false;
       }
       memset(mssg_buf, 0, sizeof mssg_buf);
     }
-    if(seconds_passed > 3 && !message_completed) {
-      printf("_timer_message_not_completed_timer_message_not_completed_timer_\n");
-      printf("%d loops, %f seconds, current numbytes %d (server data -> client)\n", count, seconds_passed, numbytes);
-      printf("_timer_message_not_completed_timer_message_not_completed_timer_\n");
-    }
   }
-
-  /* TODO: remove after testing */
-  gettimeofday(&current, NULL); // TODO: remove
-  seconds_passed = (current.tv_sec - start.tv_sec);
-  if(seconds_passed > 10) {
-    printf("_timer_timer_timer_timer_timer_timer_timer_timer_timer_timer_timer_\n");
-    printf("send_webserver_data_to_client COMPLETED after %f seconds\n", seconds_passed);
-    printf("_timer_timer_timer_timer_timer_timer_timer_timer_timer_timer_timer_\n");
-  }
-  /* TODO: remove after testing */
 
   return message_completed;
 }
@@ -681,9 +556,6 @@ void send_error_to_client(int& client_sockfd, Proxy_Error& err) {
 /* returns an appropriate error message (as a string) for the given err */
 void get_proxy_error_msg(std::string msg, Proxy_Error& err) {
   switch(err) {
-    case e_read_req:
-      msg += "Failed to read HTTP request. Please try again.\n";
-      break;
      case e_serv_connect:
       msg += "Connection to web server failed.\n";
       break;
