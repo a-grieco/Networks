@@ -27,13 +27,13 @@
 #include "parse.h"
 
 const bool DEBUG_MODE = true;
-const bool INCLUDE_PROXY_ERROR_MSGS = true;
+const bool INCLUDE_PROXY_ERROR_MSGS = false;
 
 const std::string STANDARD_ERROR_MESSAGE = "HTTP/1.0 500 Internal error\n";
 const std::string HTTP_BODY_HEADER = "Content-Length";  // # bytes in body
 
-const bool PREEMPT_EXIT = true;     // if true, exits if the time to complete
-const int MAX_SECONDS_TO_WAIT = 5;  // exceeds MAX_SECONDS_TO_WAIT
+const bool PREEMPT_EXIT = true;     // if true, exits if the time to complete...
+const int MAX_SECONDS_TO_WAIT = 5;  // ...exceeds MAX_SECONDS_TO_WAIT
 const int STANDARD_PORT = 80;
 
 const int MAX_BLANK_RECVS = 3;  // max consecutive 0 bytes recv() allowed
@@ -41,16 +41,15 @@ const int MAX_BLANK_RECVS = 3;  // max consecutive 0 bytes recv() allowed
 const int DEFAULT_PORT_NUMBER = 10042;
 
 const int CONNECTIONS_ALLOWED = 30;
-const int MAX_THREADS_SUPPORTED = 10;
+const int MAX_THREADS_SUPPORTED = 30;
 
 const int MAX_SLEEP_SECONDS = 5;  // wait before attempt to create thread
 
 const int BUFFERSIZE = 10000;
 const int BODY_BUFFERSIZE = 1000;
-//const int MAXDATASIZE = 10000; // max size of client HTTP request //TODO: just one size?
 
 enum Proxy_Error { e_read_req, e_serv_connect, e_serv_send, e_serv_recv,
-  e_tout_recv_req, e_tout_recv_req_body };
+   e_empty_req };
 
 int thread_count = -1;  // initial connection brings count to 0
 pthread_mutex_t count_mutex = PTHREAD_MUTEX_INITIALIZER;
@@ -64,7 +63,7 @@ void set_port_number(char* port_buf, int port_int);
 
 void create_and_bind_to_socket(int& client_sockfd, const char* port_buf);
 bool get_msg_from_client(int client_sockfd, std::string& req_header_mssg,
-  char(&body_buf)[BODY_BUFFERSIZE]);
+  char (&body_buf)[BODY_BUFFERSIZE]);
 bool connect_to_web_server(std::string webserv_host, std::string webserv_port,
     int& webserv_sockfd);
 bool send_webserver_data_to_client(int webserv_sockfd, int new_sockfd);
@@ -105,7 +104,19 @@ int main(int argc, char * argv[]) {
   };
   if(DEBUG_MODE) { printf("Proxy listening for connections...\n"); }
 
-  signal(SIGPIPE, SIG_IGN); // ignore errors that cause proxy to shut down
+  // initialize detached attribute (detached pthreads exit without joining)
+  pthread_attr_t attr;
+  int ret;
+  if((ret = pthread_attr_init(&attr))) {
+    printf("pthread_attr_init() error %d\n", ret);
+    exit(EXIT_FAILURE);
+  }
+  if((ret = pthread_attr_setdetachstate(&attr, PTHREAD_CREATE_DETACHED))) {
+    printf("pthread_attr_setdetachstate() error %d\n", ret);
+    exit(EXIT_FAILURE);
+  }
+
+  signal(SIGPIPE, SIG_IGN); // ignore signals that shut down proxy
 
   // accept incoming connections
   while(true) {
@@ -118,7 +129,7 @@ int main(int argc, char * argv[]) {
     // only allow MAX_THREADS_SUPPORTED to exist simultaneously
     int sleep_seconds = 0;
     while(!(increment_thread_count_successful())) {
-     // if unsuccessful, wait before trying again (1 sec -> MAX_SLEEP_SECONDS)
+     // wait before trying again (1 sec -> MAX_SLEEP_SECONDS)
      if(sleep_seconds < MAX_SLEEP_SECONDS) { ++sleep_seconds; }
      else { sleep_seconds = sleep_seconds / 2; }
      std::this_thread::sleep_for(std::chrono::seconds(sleep_seconds));
@@ -133,14 +144,14 @@ int main(int argc, char * argv[]) {
 
     int err;
     pthread_t thread_id;
-    if((err = pthread_create(&thread_id, NULL, thread_connect, &new_sockfd))) {
+    if((err = pthread_create(&thread_id, &attr, thread_connect, &new_sockfd))) {
       if(DEBUG_MODE) { printf("Thread creation failed: %s\n", err); }
       close(new_sockfd);
     }
-    if(pthread_detach(thread_id) != 0) {
-      if(DEBUG_MODE) { perror("pthread_detach"); }
-    }
   }
+
+  pthread_attr_destroy(&attr);  // code should not reach this point
+  pthread_exit(NULL);
 
   signal(SIGTERM, clean_exit);
   signal(SIGINT, clean_exit);
@@ -152,7 +163,7 @@ int main(int argc, char * argv[]) {
 void decrement_thread_count() {
   pthread_mutex_lock(&count_mutex);
   --thread_count;
-  if(DEBUG_MODE) { printf("\t\t\t\t\tthread_count decremented: %d\n", thread_count);}
+  if(DEBUG_MODE) { printf("Thread count decremented to %d\n", thread_count);}
   pthread_mutex_unlock(&count_mutex);
 }
 
@@ -167,12 +178,8 @@ bool increment_thread_count_successful() {
     success = true;
   }
   if(DEBUG_MODE) {
-    if(thread_count >= MAX_THREADS_SUPPORTED && !success) {
-      printf("\t\t\t\t\tThread count MAXED OUT at %d threads.\n", thread_count);
-    }
-    else {
-      printf("\t\t\t\t\tthread_count incremented: %d\n", thread_count);
-    }
+    if(!success) { printf("Thread count MAXED OUT at %d.\n", thread_count); }
+    else { printf("Thread count incremented to %d\n", thread_count);}
   }
   pthread_mutex_unlock(&count_mutex);
   return success;
@@ -181,6 +188,7 @@ bool increment_thread_count_successful() {
 /* When successful, enables a thread to connect to a webserver, request data,
  * and return that data to a client. If unsuccessful, sends error to client. */
 void* thread_connect (void * new_sockfd_ptr) {
+
   /* TODO: remove - for testing */
   struct timeval start, current;
   double seconds_passed;
@@ -190,12 +198,14 @@ void* thread_connect (void * new_sockfd_ptr) {
 
   int new_sockfd = *((int*) new_sockfd_ptr);
   int webserv_sockfd;
-  std::string req_headers, webserv_host, webserv_port, data;
+  std::string req_headers, body, webserv_host, webserv_port, data;
   char body_buf[BODY_BUFFERSIZE];
   if(!get_msg_from_client(new_sockfd, req_headers, body_buf)) {
     close(new_sockfd);
     decrement_thread_count();
+
     /* TODO: remove after testing */
+    if(DEBUG_MODE){
     gettimeofday(&current, NULL); // TODO: remove
     seconds_passed = (current.tv_sec - start.tv_sec);
     if(seconds_passed > 10) {
@@ -203,20 +213,24 @@ void* thread_connect (void * new_sockfd_ptr) {
       printf("!get_msg_from_client FAILED after %f seconds\n", seconds_passed);
       printf("attemting to get req_headers: %s\n", req_headers.c_str());
       printf("_timer_timer_timer_timer_timer_timer_timer_timer_timer_timer_timer_\n");
-    }
+    }}
     /* TODO: remove after testing */
+
     pthread_exit(NULL);
+    return NULL;
   }
 
-  // if parse fails, send error message ('data') and close client connection
-  if(req_headers.size() < strlen("http://x/")) {
+  // check if request and header lines are long enough to be valid
+  if(req_headers.size() <= strlen("GET http://x/ HTTP/1.0")) {
     close(new_sockfd);
     decrement_thread_count();
-    /* TODO: remove after testing */
-    printf("REJECTED EMPTY REQ_HEADERS - ASSUME BAD CONNECTION: %s\n", req_headers.c_str());
-    /* TODO: remove after testing */
+    Proxy_Error err = e_empty_req;
+    send_error_to_client(new_sockfd, err);
+    if(DEBUG_MODE) { printf("Rejected empty request line.\n"); }
     pthread_exit(NULL);
+    return NULL;
   }
+  // if parse fails, send error message ('data') and close client connection
   if(!get_parsed_data(req_headers, webserv_host, webserv_port, data)) {
     if(DEBUG_MODE) {
       printf("+++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++\n");
@@ -228,6 +242,7 @@ void* thread_connect (void * new_sockfd_ptr) {
     close(new_sockfd);
     decrement_thread_count();
     pthread_exit(NULL);
+    return NULL;
   }
   // parsing successful; generated HTTP request ('data') received
 
@@ -238,6 +253,7 @@ void* thread_connect (void * new_sockfd_ptr) {
     close(new_sockfd);
     decrement_thread_count();
     /* TODO: remove after testing */
+    if(DEBUG_MODE){
     gettimeofday(&current, NULL); // TODO: remove
     seconds_passed = (current.tv_sec - start.tv_sec);
     if(seconds_passed > 10) {
@@ -245,9 +261,10 @@ void* thread_connect (void * new_sockfd_ptr) {
       printf("!connect_to_web_server exited after %f seconds\n", seconds_passed);
       printf("HOST: %s, PORT: %s\n", webserv_host.c_str(), webserv_port.c_str());
       printf("_timer_timer_timer_timer_timer_timer_timer_timer_timer_timer_timer_\n");
-    }
+    }}
     /* TODO: remove after testing */
     pthread_exit(NULL);
+    return NULL;
   }
 
   // connection to web server successful, send 'data' and body if present
@@ -259,53 +276,59 @@ void* thread_connect (void * new_sockfd_ptr) {
   }
   if(DEBUG_MODE) {
     printf("STRING FORM............web server request.......................\n");
-    printf("%s%s", data.c_str(), body_buf);
-    printf("BUFFER FORM.....................................................\n");
     printf("%s", webserv_req_buf);
     printf("................................................................\n");
-   }
+  }
 
   int length = strlen(webserv_req_buf);
-  if(send_all(webserv_sockfd, (char*)data.c_str(), &length) == -1) {
+  if(send_all(webserv_sockfd, webserv_req_buf, &length) == -1) {
     if(DEBUG_MODE) { perror("Sending HTTP request to web server.\n\tsend_all"); }
     Proxy_Error err = e_serv_send;
     send_error_to_client(new_sockfd, err);
     close(new_sockfd);
     decrement_thread_count();
     /* TODO: remove after testing */
+    if(DEBUG_MODE){
     gettimeofday(&current, NULL); // TODO: remove
     seconds_passed = (current.tv_sec - start.tv_sec);
     if(seconds_passed > 10) {
       printf("_timer_timer_timer_timer_timer_timer_timer_timer_timer_timer_timer_\n");
       printf("HTTP request to web server exited after %f seconds\n", seconds_passed);
       printf("_timer_timer_timer_timer_timer_timer_timer_timer_timer_timer_timer_\n");
-    }
+    }}
     /* TODO: remove after testing */
     pthread_exit(NULL);
+    return NULL;
   }
 
   // attempt to retrieve data from webserver and redirect to client
   if(!send_webserver_data_to_client(webserv_sockfd, new_sockfd)) {
     close(new_sockfd);
     decrement_thread_count();
+
+    /* TODO: remove after testing */
+    if(DEBUG_MODE){
     if(seconds_passed > 10) {
       printf("_timer_timer_timer_timer_timer_timer_timer_timer_timer_timer_timer_\n");
       printf("!send_webserver_data_to_client exited after %f seconds\n", seconds_passed);
       printf("_timer_timer_timer_timer_timer_timer_timer_timer_timer_timer_timer_\n");
-    }
+    }}
+    /* TODO: remove after testing */
+
     pthread_exit(NULL);
   }
 
   close(new_sockfd);  // release client, transaction successful
   decrement_thread_count();
   /* TODO: remove after testing */
+  if(DEBUG_MODE){
   gettimeofday(&current, NULL); // TODO: remove
   seconds_passed = (current.tv_sec - start.tv_sec);
   if(seconds_passed > 10) {
     printf("_timer_success_timer_success_timer_success_timer_success_timer_\n");
     printf("___SUCCESSFUL___ after %f seconds\n", data.c_str(), seconds_passed);
     printf("_timer_success_timer_success_timer_success_timer_success_timer_\n");
-  }
+  }}
   /* TODO: remove after testing */
   pthread_exit(NULL);
 }
@@ -651,10 +674,7 @@ void send_error_to_client(int& client_sockfd, Proxy_Error& err) {
   error_msg += "\n";
   int length = error_msg.length();
   if(send_all(client_sockfd, (char*)error_msg.c_str(), &length) == -1) {
-    perror("Sending error message to client.\n\tsend_all");
-    if(DEBUG_MODE) {
-      printf("%d bytes of error message sent to client.\n", length);
-    }
+    if(DEBUG_MODE) { perror("Sending error message to client.\n\tsend_all"); }
   }
 }
 
@@ -673,11 +693,8 @@ void get_proxy_error_msg(std::string msg, Proxy_Error& err) {
      case e_serv_recv:
       msg += "Unable to redirect web server data. Please retry request.\n";
       break;
-     case e_tout_recv_req:
-      msg += "Error retrieving HTTP request.\n";
-      break;
-     case e_tout_recv_req_body:
-      msg += "Error retrieving HTTP request body.\n";
+    case e_empty_req:
+      msg += "Empty request line.\n";
       break;
   }
 }

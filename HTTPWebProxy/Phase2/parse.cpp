@@ -337,7 +337,6 @@ bool extract_and_verify_port(std::string& host, std::string& port,
   // if port included, divide from host
   port = host.substr(pos + port_delim.size());
   host = host.substr(0, pos);
-  printf("!!!!!!!!!!!!!!!!!!!     %s\n      !!!!!!!!!!!!!!!!!!!!!!!!!!!", port.c_str());  // TODO: delete
   if(!verify_port(port)) {
     err = e_port;
     return false;
@@ -367,8 +366,7 @@ bool verify_headers(std::vector<std::string> &headers, Parse_Error& err) {
   std::size_t pos = 0;
   std::string name_delim = ":";
   std::string whitespace = " \r\n\t";
-  // std::string def_host = "Host", def_conn = "Connection";  // TODO: per Z - should only need these
-  std::string def_host = "Host", def_conn = "Connection", def_pc = "Proxy-Connection";  // TODO: Matt found another one
+  std::string def_host = "Host", def_conn = "Connection", def_proxy_conn = "Proxy-Connection";
   std::vector<int> dup_headers_found;
 
   std::string orig_header, name, value;
@@ -401,8 +399,8 @@ bool verify_headers(std::vector<std::string> &headers, Parse_Error& err) {
     headers.at(i) = name + value;
 
     // track indices of headers with names: 'Host' and/or 'Connection'
-    // if(is_match_caseins(def_host, name) || is_match_caseins(def_conn, name)) {
-    if(is_match_caseins(def_host, name) || is_match_caseins(def_conn, name) || is_match_caseins(def_pc, name)) {
+    if(is_match_caseins(def_host, name) || is_match_caseins(def_conn, name)
+        || is_match_caseins(def_proxy_conn, name)) {
       dup_headers_found.push_back(i);
     }
   }
