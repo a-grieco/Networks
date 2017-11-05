@@ -17,7 +17,7 @@
 #include "parse.h"
 
 const bool DEBUG_MODE = false;
-const bool INCLUDE_PARSING_ERROR_MSGS = true;
+const bool INCLUDE_PARSING_ERROR_MSGS = false;
 
 const std::string DEFAULT_PORT = "80";
 const std::string VALID_METHOD = "GET";
