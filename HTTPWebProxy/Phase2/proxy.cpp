@@ -46,6 +46,7 @@ const int MAX_THREADS_SUPPORTED = 10;
 const int MAX_SLEEP_SECONDS = 5;  // wait before attempt to create thread
 
 const int BUFFERSIZE = 10000;
+const int BODY_BUFFERSIZE = 1000;
 //const int MAXDATASIZE = 10000; // max size of client HTTP request //TODO: just one size?
 
 enum Proxy_Error { e_read_req, e_serv_connect, e_serv_send, e_serv_recv,
@@ -63,7 +64,7 @@ void set_port_number(char* port_buf, int port_int);
 
 void create_and_bind_to_socket(int& client_sockfd, const char* port_buf);
 bool get_msg_from_client(int client_sockfd, std::string& req_header_mssg,
-  std::string& body_msg);
+  char(&body_buf)[BODY_BUFFERSIZE]);
 bool connect_to_web_server(std::string webserv_host, std::string webserv_port,
     int& webserv_sockfd);
 bool send_webserver_data_to_client(int webserv_sockfd, int new_sockfd);
@@ -189,8 +190,9 @@ void* thread_connect (void * new_sockfd_ptr) {
 
   int new_sockfd = *((int*) new_sockfd_ptr);
   int webserv_sockfd;
-  std::string req_headers, body, webserv_host, webserv_port, data;
-  if(!get_msg_from_client(new_sockfd, req_headers, body)) {
+  std::string req_headers, webserv_host, webserv_port, data;
+  char body_buf[BODY_BUFFERSIZE];
+  if(!get_msg_from_client(new_sockfd, req_headers, body_buf)) {
     close(new_sockfd);
     decrement_thread_count();
     /* TODO: remove after testing */
@@ -211,13 +213,7 @@ void* thread_connect (void * new_sockfd_ptr) {
     close(new_sockfd);
     decrement_thread_count();
     /* TODO: remove after testing */
-    gettimeofday(&current, NULL); // TODO: remove
-    seconds_passed = (current.tv_sec - start.tv_sec);
-    if(seconds_passed > 10) {
-      printf("_timer_timer_timer_timer_timer_timer_timer_timer_timer_timer_timer_\n");
-      printf("req_headers.size() < xxx exited after %f seconds\n", seconds_passed);
-      printf("_timer_timer_timer_timer_timer_timer_timer_timer_timer_timer_timer_\n");
-    }
+    printf("REJECTED EMPTY REQ_HEADERS - ASSUME BAD CONNECTION: %s\n", req_headers.c_str());
     /* TODO: remove after testing */
     pthread_exit(NULL);
   }
@@ -255,14 +251,21 @@ void* thread_connect (void * new_sockfd_ptr) {
   }
 
   // connection to web server successful, send 'data' and body if present
-  if(!body.empty()) { data += body; }
+  char webserv_req_buf[BUFFERSIZE];
+  memset(webserv_req_buf, 0, sizeof webserv_req_buf);
+  strncpy(webserv_req_buf, data.c_str(), data.length());
+  if(strlen(body_buf) > 0) {
+    strcat(webserv_req_buf, body_buf);
+  }
   if(DEBUG_MODE) {
-    printf("......................web server request.......................\n");
-    printf("%s", data.c_str());
-    printf("...............................................................\n");
+    printf("STRING FORM............web server request.......................\n");
+    printf("%s%s", data.c_str(), body_buf);
+    printf("BUFFER FORM.....................................................\n");
+    printf("%s", webserv_req_buf);
+    printf("................................................................\n");
    }
 
-  int length = data.length();
+  int length = strlen(webserv_req_buf);
   if(send_all(webserv_sockfd, (char*)data.c_str(), &length) == -1) {
     if(DEBUG_MODE) { perror("Sending HTTP request to web server.\n\tsend_all"); }
     Proxy_Error err = e_serv_send;
@@ -373,7 +376,7 @@ void create_and_bind_to_socket(int& client_sockfd, const char* port_buf) {
 /* Receives HTTP message from client and returns as a string; marks the end of
  * the message with two repeating newlines ('\r\n\r\n' or '\n\n') */
 bool get_msg_from_client(int client_sockfd, std::string& req_header_mssg,
-  std::string& body_mssg) {
+  char(&body_buf)[BODY_BUFFERSIZE]) {
 
     /* TODO: remove - for testing */
     struct timeval start, current;
@@ -387,9 +390,10 @@ bool get_msg_from_client(int client_sockfd, std::string& req_header_mssg,
   int num_bytes_req_headers = 0, num_bytes_body = 0;
 
   char mssg_buf[BUFFERSIZE];
-  //char fullmssg_buf[MAXDATASIZE];
+  char fullmssg_buf[BUFFERSIZE];
   memset(mssg_buf, 0, sizeof mssg_buf);
-  //memset(fullmssg_buf, 0, sizeof fullmssg_buf);
+  memset(fullmssg_buf, 0, sizeof fullmssg_buf);
+  memset(body_buf, 0, sizeof body_buf);
 
   std::string full_mssg;
   std::string mssg_end_used;  // (standard cr-lf or just lf)
@@ -411,16 +415,16 @@ bool get_msg_from_client(int client_sockfd, std::string& req_header_mssg,
       continue;
     }
     totalbytes += numbytes;
-    mssg_buf[numbytes] = '\0';
-    full_mssg += mssg_buf;
-    // strcat(fullmssg_buf, mssg_buf);
+    // mssg_buf[numbytes] = '\0';
+    // full_mssg += mssg_buf;
+    strcat(fullmssg_buf, mssg_buf);
     // if(DEBUG_MODE) {
     //   mssg_buf[numbytes] = '\0';
     //   printf("%s", mssg_buf);
     // }
     memset(mssg_buf, 0, sizeof mssg_buf);
     // check for end of message marker
-    //full_mssg = std::string(fullmssg_buf);
+    full_mssg = std::string(fullmssg_buf);
     if(!end_detected) {
       end_detected =
         req_header_end_detected(full_mssg, mssg_end_used, mssg_end_found);
@@ -452,19 +456,19 @@ bool get_msg_from_client(int client_sockfd, std::string& req_header_mssg,
     /* TODO: remove after testing */
 
   } // message_complete
-  //if(DEBUG_MODE) { printf("...message complete\n"); }
 
   // assign values for request/header lines and body
   req_header_mssg = full_mssg.substr(0, num_bytes_req_headers);
   if(num_bytes_req_headers <= full_mssg.size()) {
-    body_mssg = full_mssg.substr(num_bytes_req_headers);
+    if(num_bytes_body > BODY_BUFFERSIZE) { printf("\nNEED MORE ROOM IN BODY_BUF\n\n");}
+    strncpy(body_buf, fullmssg_buf + num_bytes_req_headers, num_bytes_body);
   }
 
-  if(!body_mssg.empty()) {
+  if(strlen(body_buf) > 0) {
     printf("***************************************************************\n");
     printf("                         BODY FOUND\n");
     printf("_______________________________________________________________\n");
-    printf("%s\n", body_mssg.c_str());
+    printf("%s\n", body_buf);
     printf("***************************************************************\n");
   }
 
