@@ -1,0 +1,122 @@
+-------------------------------
+README: A Simple HTTP Web Proxy
+-------------------------------
+AUTHORs:  Madeline Wong
+          Matthew Irwin
+          Adrienne Grieco
+DATE:  11/5/2017
+INCLUDED: parse.h
+          parse.cpp
+          proxy.cpp
+          Makefile
+          README
+REFERENCED: Beej's Guide to Network Programming, 8 June 2016,
+            http://beej.us/guide/bgnet/output/html/multipage/index.html
+
+            World Wide Web Consortium (W3C), May 1996
+            https://www.w3.org/Protocols/rfc1945/rfc1945
+
+            HTTP Made Really Easy, 12 October 2012
+            http://www.jmarshall.com/easy/http/
+
+CONTENTS
+--------
+    1. Purpose and Design Decisions
+    2. Strengths & Weaknesses
+    3. Contributions
+    4. Compiling and Running the Program
+
+1. PURPOSE AND DESIGN DECISIONS
+-------------------------------
+This proxy is designed to intercept HTTP requests from clients, parse and verify
+those requests, and (if valid) send requests to the client's desired web server
+and then return the web server's response to the client. Upon receiving an
+invalid client request, the proxy will reply to the client with a status line
+indicating that an internal error occurred.
+
+If INCLUDE_CUSTOM_ERROR_MSGS is set to true, a message indicating the cause of
+of an error in the proxy will be included in the internal error status line. If
+set to false, only the status line, 'HTTP/1.0 500 Internal error', will appear
+to the client if an error in the proxy occurs.
+
+CLIENT:
+Connection: Set up browser of choice to connect via the proxy running on cs1 or cs2.
+            Target the port that is sent to the proxy as an argument.
+PROXY:
+Initiation: Initialize the proxy after compiling the project files and pass in
+            a port number as an argument.
+Port Number: Must be between 10000 and 13000 (inclusive) or it will be rejected
+Number Connections:  Up to 30 requests can be queued to connect to the proxy at a 
+                     time.
+Notes on Parsing:
+    get_parsed_data: the only function called from parse.cpp in proxy.cpp. If
+      the client HTTP request is valid (and has a valid host), the function
+      returns TRUE, assigns the 'host' and 'port', and 'data' contains the web
+      server request. If the parse is unsuccessful, the function returns FALSE
+      and 'data' contains a client error message.
+    Request line from client:
+      - Only 'GET' method and 'HTTP/1.0' version accepted.
+      - Absolute URI requires 'http://' URL prefix
+      - Port number defaults to '80' if not included
+      - Proxy can be configured to require a path or not.
+        * if PATH_REQUIRED set to true-> client receives an error if path absent
+        * if PATH_REQUIRED set to false-> replaces path with '/' and includes
+          a default 'GET / HTTP/1.0' in the request to the web server
+    Header lines from client (if present):
+      - name is not accepted if it contains embedded spaces
+      - header is formatted so that there will be no space between name and ':'
+      - duplicate 'Host:' and/or 'Connection:' headers are removed and the HTTP
+        request sent to the web server defaults to 'Host: <the host provided in
+        the absolute URI>' and 'Connection: close'
+
+2. STRENGTHS AND WEAKNESSES
+---------------------------
++ Checks DNS for valid host name before attempting a connection
++ Handles partial sends and receives (all loops)
++ Parsing is robust (corrects minor inconsistencies like case and/or spacing)
+  and configurable to allow default '/' in place of absolute path
+
++ Multithreaded, can take and service multiple requests at one time
+- Does no filtering of content received from web server
+
+- High latency is incurred if a client enters valid web server information with
+  an invalid port number. The delay occurs after the socket descriptor is built
+  for the webserver when the proxy attempts to connect. The connect() function
+  waits until the connection times out, then tries the next result in servinfo.
+  However, the wait for each connection timeout can be minutes long.
++ To reduce latency, a PREEMPT_EXIT flag was created. When set to TRUE, and the
+  port number given by the client isn't the standard '80', the proxy will stop
+  attempting to make a connection if the first attempt takes more than
+  MAX_SECONDS_TO_CONNECT (configurable).
+
+3. CONTRIBUTIONS
+----------------
+All of us worked together in phase 1 to come up with the design of the program. Maddie and
+Adrienne focused on parsing and validating the client request. Matt focused on
+accurately rerouting the web server data to the client. Piecing the components
+together and troubleshooting was a collaborative effort. Phase 2 introduced the
+additional complexity of accepting parallel client requests and verifying browser support.
+Matt implemented the parallelism while Maddie and Adrienne spend time making sure that 
+browers requests could be successfully serviced by the proxy. There was significant complexity 
+involved with verfying correctness in this phase.
+
+4. COMPILING AND RUNNING THE PROGRAM
+------------------------------------
+Use "make" to compile the proxy into an executable: proxy
+Use "make clean" to remove the executable.
+
+Start the proxy on Port Number 10042 (automatically selected) by typing into the
+command line:
+    ./proxy
+Or start the proxy on a specified Port Number by typing into the command line:
+    ./proxy <port_number>
+    example:  ./proxy 10042
+Note: Port number must be between 10000 and 13000 (inclusive)
+
+After the proxy is running, in a browser window configured to make requests directly to 
+the currently running proxy, send a request to any desired URL:
+    example: configure Mozilla Firefox to route requests to cs2.seattleu.edu and port 10042,
+    then send a request to load 'www.ikea.com'
+
+The client side broweser should function as if it was oblivious of the proxy and have 
+the requested webpage loaded.
