@@ -47,9 +47,6 @@ const int MAX_THREADS_SUPPORTED = 30;
 
 const int MAX_SLEEP_SECONDS = 5;  // wait before attempt to create thread
 
-const int SMALL_BUFFERSIZE = 1000;
-const int BUFFERSIZE = 3000;
-
 enum Proxy_Error { e_serv_connect, e_serv_send, e_serv_recv, e_empty_req };
 
 int thread_count = -1;  // initial connection brings count to 0
@@ -200,6 +197,9 @@ void* thread_connect (void * new_sockfd_ptr) {
   char req_buf[SMALL_BUFFERSIZE];
   char header_buf[BUFFERSIZE];
   char body_buf[BUFFERSIZE];
+  memset(req_buf, 0, sizeof req_buf);
+  memset(header_buf, 0, sizeof header_buf);
+  memset(body_buf, 0, sizeof body_buf);
 
   std::string webserv_host, webserv_port;
 
@@ -220,14 +220,15 @@ void* thread_connect (void * new_sockfd_ptr) {
   //   pthread_exit(NULL);
   // }
 
-  std::string data, req_headers; //TODO
+  std::string data, req_headers; //TODO - replace with new values
 
   // parse request and header lines
-  if(!get_parsed_data(req_headers, webserv_host, webserv_port, data)) {
+  if(!get_parsed_data(size_request, size_headers, req_buf, header_buf,
+    webserv_host, webserv_port, data)) {
     if(DEBUG_MODE) {
       printf("+++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++\n");
       printf("PARSE ERROR:\n%s\n", data.c_str());
-      printf("RECEIVED:\t%s\n", req_headers.c_str());
+      printf("RECEIVED:\t%s%s", req_buf, header_buf);
       printf("+++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++\n");
     }
     send_error_to_client(new_sockfd, data);
@@ -235,6 +236,9 @@ void* thread_connect (void * new_sockfd_ptr) {
     decrement_thread_count();
     pthread_exit(NULL);
   } // parsing successful; generated HTTP request ('data') for request/headers
+
+  printf("REQ_BUF %s\n", req_buf);
+  printf("HEADER_BUF %s\n", header_buf);
 
   // connect to web server
   if(!connect_to_web_server(webserv_host, webserv_port, webserv_sockfd)) {
@@ -245,17 +249,28 @@ void* thread_connect (void * new_sockfd_ptr) {
     pthread_exit(NULL);
   }
 
-  // include body in web server request (if present)
-  // if(size_body > 0) { data += body; }
+  // create web server request
+  char webserv_req_buf[BUFFERSIZE];
+  memset(webserv_req_buf, 0, sizeof webserv_req_buf);
+  strcat(webserv_req_buf, data.c_str());
+  printf("DATA: %s\n", data.c_str());
+  printf("DATA: webserv_req_buf %s\n", webserv_req_buf);
+  if(size_headers > 0) {
+    strcat(webserv_req_buf, header_buf);
+    if(size_body > 0) {
+      strcat(webserv_req_buf, body_buf);
+    }
+  }
+
   if(DEBUG_MODE) {
     printf("......................web server request.......................\n");
-    printf("%s", data.c_str());
+    printf("%s", webserv_req_buf);
     printf("...............................................................\n");
   }
 
   // send HTTP request to web server
-  int length = data.length();
-  if(send_all(webserv_sockfd, (char*)data.c_str(), &length) == -1) {
+  int length = strlen(webserv_req_buf);
+  if(send_all(webserv_sockfd, webserv_req_buf, &length) == -1) {
     if(DEBUG_MODE) { perror("Sending HTTP request to server.\n\tsend_all"); }
     Proxy_Error err = e_serv_send;
     send_error_to_client(new_sockfd, err);
@@ -574,7 +589,7 @@ bool send_webserver_data_to_client(int webserv_sockfd, int new_sockfd) {
     }
     else {
       mssg_buf[numbytes] = '\0';
-      int length = strlen(mssg_buf);
+      int length = numbytes;
       if(send_all(new_sockfd, mssg_buf, &length) == -1) {
         if(DEBUG_MODE) { perror("Sending server data to client.\n\tsend_all"); }
         return false;
