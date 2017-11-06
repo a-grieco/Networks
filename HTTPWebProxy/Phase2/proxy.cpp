@@ -28,8 +28,8 @@
 
 #include "parse.h"
 
-const bool DEBUG_MODE = false;
-const bool INCLUDE_PROXY_ERROR_MSGS = false;
+const bool DEBUG_MODE = true;
+const bool INCLUDE_PROXY_ERROR_MSGS = true;
 
 const std::string STANDARD_ERROR_MESSAGE = "HTTP/1.0 500 Internal error\n";
 const std::string HTTP_BODY_HEADER = "Content-Length";  // # bytes in body
@@ -47,7 +47,8 @@ const int MAX_THREADS_SUPPORTED = 30;
 
 const int MAX_SLEEP_SECONDS = 5;  // wait before attempt to create thread
 
-const int BUFFERSIZE = 10000;
+const int SMALL_BUFFERSIZE = 1000;
+const int BUFFERSIZE = 3000;
 
 enum Proxy_Error { e_serv_connect, e_serv_send, e_serv_recv, e_empty_req };
 
@@ -62,8 +63,9 @@ bool port_number_is_valid(int& port_int, int port_number_arg);
 void set_port_number(char* port_buf, int port_int);
 
 void create_and_bind_to_socket(int& client_sockfd, const char* port_buf);
-bool get_msg_from_client(int client_sockfd, std::string& req_header_mssg,
-  std::string& body_mssg);
+bool get_msg_from_client(int client_sockfd, char (&req_buf)[SMALL_BUFFERSIZE],
+  char (&header_buf)[BUFFERSIZE], char (&body_buf)[BUFFERSIZE],
+  size_t& num_bytes_request, size_t& num_bytes_headers, size_t& num_bytes_body);
 bool connect_to_web_server(std::string webserv_host, std::string webserv_port,
     int& webserv_sockfd);
 bool send_webserver_data_to_client(int webserv_sockfd, int new_sockfd);
@@ -71,7 +73,8 @@ void send_error_to_client(int& client_sockfd, std::string& parse_err);
 void send_error_to_client(int& client_sockfd, Proxy_Error& err);
 
 bool req_header_end_detected(std::string& msg, std::string& end_used,
-  size_t& msg_end_found);
+  size_t& msg_end_found, std::string& req_end_used, size_t& req_end_found,
+  bool& headers_detected);
 int get_bytes_in_body(std::string& msg, size_t msg_end);
 void get_proxy_error_msg(std::string msg, Proxy_Error& err);
 int send_all(int socket, char *data_buf, int *length);
@@ -191,22 +194,33 @@ void* thread_connect (void * new_sockfd_ptr) {
 
   int new_sockfd = *((int*) new_sockfd_ptr);
   int webserv_sockfd;
-  std::string req_headers, body, webserv_host, webserv_port, data;
-  if(!get_msg_from_client(new_sockfd, req_headers, body)) {
+
+  size_t size_request, size_headers, size_body; // size in bytes
+
+  char req_buf[SMALL_BUFFERSIZE];
+  char header_buf[BUFFERSIZE];
+  char body_buf[BUFFERSIZE];
+
+  std::string webserv_host, webserv_port;
+
+  if(!get_msg_from_client(new_sockfd, req_buf, header_buf, body_buf,
+    size_request, size_headers, size_body)) {
     close(new_sockfd);
     decrement_thread_count();
     pthread_exit(NULL);
   }
 
   // check if request and header lines are long enough to be valid
-  if(req_headers.size() <= strlen("GET http://x/ HTTP/1.0")) {
-    close(new_sockfd);
-    decrement_thread_count();
-    Proxy_Error err = e_empty_req;
-    send_error_to_client(new_sockfd, err);
-    if(DEBUG_MODE) { printf("Rejected empty request line.\n"); }
-    pthread_exit(NULL);
-  }
+  // if(req_headers.size() <= strlen("GET http://x/ HTTP/1.0")) {
+  //   close(new_sockfd);
+  //   decrement_thread_count();
+  //   Proxy_Error err = e_empty_req;
+  //   send_error_to_client(new_sockfd, err);
+  //   if(DEBUG_MODE) { printf("Rejected empty request line.\n"); }
+  //   pthread_exit(NULL);
+  // }
+
+  std::string data, req_headers; //TODO
 
   // parse request and header lines
   if(!get_parsed_data(req_headers, webserv_host, webserv_port, data)) {
@@ -232,7 +246,7 @@ void* thread_connect (void * new_sockfd_ptr) {
   }
 
   // include body in web server request (if present)
-  if(!body.empty() > 0) { data += body; }
+  // if(size_body > 0) { data += body; }
   if(DEBUG_MODE) {
     printf("......................web server request.......................\n");
     printf("%s", data.c_str());
@@ -326,23 +340,40 @@ void create_and_bind_to_socket(int& client_sockfd, const char* port_buf) {
 /* If successful, gets HTTP message from client, assigns result to strings
  * (one for the request and header lines: 'req_header_mssg', and one for the
  * body: 'body_mssg'), and returns true; otherwise returns false. */
-bool get_msg_from_client(int client_sockfd, std::string& req_header_mssg,
-  std::string& body_mssg) {
+bool get_msg_from_client(int client_sockfd, char (&req_buf)[SMALL_BUFFERSIZE],
+  char (&header_buf)[BUFFERSIZE], char (&body_buf)[BUFFERSIZE],
+  size_t& num_bytes_request, size_t& num_bytes_headers, size_t& num_bytes_body)
+  {
 
   int numbytes = 0, totalbytes = 0, totalbytes_needed = 0;
-  int num_bytes_req_headers = 0, num_bytes_body = 0;
+
+  int num_bytes_req_headers = 0;
+
+  num_bytes_request = 0;
+  num_bytes_headers = 0;
+  num_bytes_body = 0;
 
   char mssg_buf[BUFFERSIZE];
+  char fullmssg_buf[BUFFERSIZE];
   memset(mssg_buf, 0, sizeof mssg_buf);
+  memset(fullmssg_buf, 0, sizeof fullmssg_buf);
+
+  memset(req_buf, 0, sizeof req_buf);
+  memset(header_buf, 0, sizeof header_buf);
+  memset(body_buf, 0, sizeof body_buf);
+
+  size_t mssg_end_found;
+  size_t req_end_found;
 
   std::string full_mssg;
-  std::string mssg_end_used;  // (standard cr-lf or lf only)
+  std::string mssg_end_used;  // (standard cr-lf-cr-lf or lf-lf only)
+  std::string req_end_used;   // (standard cr-lf or lf only)
 
   bool end_detected = false;  // recognize end of req/headers (mssg_end)
+  bool headers_detected = false;
   bool body_detected = false;
   bool message_complete = false;
 
-  size_t mssg_end_found;
 
   // retrieve request and optional header lines from client HTTP request
   while(!message_complete) {
@@ -355,18 +386,26 @@ bool get_msg_from_client(int client_sockfd, std::string& req_header_mssg,
       continue;
     }
     totalbytes += numbytes;
-    mssg_buf[numbytes] = '\0';
-    full_mssg += mssg_buf;
+    strcat(fullmssg_buf, mssg_buf);
     memset(mssg_buf, 0, sizeof mssg_buf);
 
     // check for end of message marker if not yet detected
+    full_mssg = std::string(fullmssg_buf);
     if(!end_detected) {
       end_detected =
-        req_header_end_detected(full_mssg, mssg_end_used, mssg_end_found);
+        req_header_end_detected(full_mssg, mssg_end_used, mssg_end_found,
+          req_end_used, req_end_found, headers_detected);
       if(end_detected) {
         num_bytes_req_headers = mssg_end_found + mssg_end_used.size();
         size_t header_found = full_mssg.find(HTTP_BODY_HEADER);
         body_detected = header_found != std::string::npos;
+        if(headers_detected) {
+          num_bytes_request = req_end_found + req_end_used.size();
+          num_bytes_headers = num_bytes_req_headers - num_bytes_request;
+        }
+        else {
+          num_bytes_request = num_bytes_req_headers;
+        }
         if(body_detected) {
           num_bytes_body = get_bytes_in_body(full_mssg, header_found);
           totalbytes_needed = num_bytes_req_headers + num_bytes_body;
@@ -381,14 +420,18 @@ bool get_msg_from_client(int client_sockfd, std::string& req_header_mssg,
   } // message_complete
 
   // assign values for request/header lines and body
-  req_header_mssg = full_mssg.substr(0, num_bytes_req_headers);
-  if(num_bytes_req_headers <= full_mssg.size()) {
-    body_mssg = full_mssg.substr(num_bytes_req_headers);
+  strncpy(req_buf, fullmssg_buf, num_bytes_request);
+  if (headers_detected) {
+    strncpy(header_buf, fullmssg_buf + num_bytes_request, num_bytes_headers);
   }
-  if(DEBUG_MODE && !body_mssg.empty()) {
+  if(num_bytes_req_headers <= full_mssg.size()) { // if body exists
+    strncpy(body_buf, fullmssg_buf + num_bytes_req_headers, num_bytes_body);
+  }
+  if(DEBUG_MODE) {
     printf("_______________________________________________________________\n");
-    printf("                         BODY FOUND\n");
-    printf("%s\n", body_mssg.c_str());
+    printf("REQUEST: %s\n", req_buf);
+    printf("HEADERs: %s\n", header_buf);
+    printf("BODY: %s\n", body_buf);
     printf("_______________________________________________________________\n");
   }
   return true;
@@ -397,20 +440,49 @@ bool get_msg_from_client(int client_sockfd, std::string& req_header_mssg,
 /* Checks the portion of the client message received for the end of the request
  * and header lines and returns true if found or false if not. */
 bool req_header_end_detected(std::string& msg, std::string& end_used,
-  size_t& msg_end_found) {
-  std::string req_header_mssg_end = "\r\n\r\n"; // cr lf = standard
-  std::string alt_req_header_mssg_end = "\n\n"; // gracefully handle lf only
-  msg_end_found = msg.find(req_header_mssg_end);
+  size_t& msg_end_found, std::string& req_end_used, size_t& req_end_found,
+  bool& headers_detected) {
+
+  bool is_detected = false;
+
+  std::string mssg_end = "\r\n\r\n"; // cr lf cr lf = standard
+  std::string alt_mssg_end = "\n\n"; // gracefully handle lf lf only
+
+  // find end of request/header message & the type used
+  msg_end_found = msg.find(mssg_end);
   if(msg_end_found != std::string::npos) {
-    end_used = req_header_mssg_end;
-    return true;
+    end_used = mssg_end;
+    is_detected = true;
   }
-  msg_end_found = msg.find(alt_req_header_mssg_end);
-  if(msg_end_found != std::string::npos) {
-    end_used = alt_req_header_mssg_end;
-    return true;
+  else {
+    msg_end_found = msg.find(alt_mssg_end);
+    if(msg_end_found != std::string::npos) {
+      end_used = alt_mssg_end;
+      is_detected = true;
+    }
   }
-  return false;
+
+  // if end detected, find if request includes headers
+  if(is_detected) {
+    std::string req_msg = msg.substr(0, msg_end_found);
+    std::string req_end = "\r\n"; // cr lf = standard
+    std::string alt_req_end = "\n"; // gracefully handle lf only
+
+    req_end_found = req_msg.find(req_end);
+    if(req_end_found != std::string::npos) {
+      req_end_used = req_end;
+      headers_detected = true;
+    }
+    else {
+      req_end_found = req_msg.find(alt_req_end);
+      if(req_end_found != std::string::npos) {
+        req_end_used = alt_req_end;
+        headers_detected = true;
+      }
+    }
+  }
+
+  return is_detected;
 }
 
 /* Accepts the HTTP request starting at the first position of HTTP_BODY_HEADER
