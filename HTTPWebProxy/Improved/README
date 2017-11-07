@@ -4,7 +4,7 @@ README: A Simple HTTP Web Proxy
 AUTHORs:  Madeline Wong
           Matthew Irwin
           Adrienne Grieco
-DATE:  11/5/2017
+DATE:  11/6/2017
 INCLUDED: parse.h
           parse.cpp
           proxy.cpp
@@ -28,6 +28,27 @@ CONTENTS
 
 1. PURPOSE AND DESIGN DECISIONS
 -------------------------------
+
+***A note on this submission***
+The team is aware of that fact that this resubmission is late by one day. The 
+code that was sent in on Sunday night was not up to the standards that this team had 
+set forth from the start of this project. The 10% point deduction is worth making 
+sure that we are better represented as a group. The proxy now runs significatly faster
+and loads the contents of webpages much more accurately and reliably. 
+
+Some of the improvements that were made in the last day:
+- Sig handlers were not proplery handing SIGPIPE signals, the method that we were 
+  using had been deprecated.
+- The socket used to connect each thread to the requested webserver was not being 
+  properly closed at various points throughot the code. This caused the code to crash 
+  about 2 minutes into utilization due to hitting the file header limit on cs2. 
+- Improved parser's request generator to include proper carriage returns on requests
+  to the server.
+- Adjusted the buffer sizes used throughout the program to better fit their 
+  utilization.
+- Removed the static thread limit within the program to allow for better reasource 
+  usage
+
 This proxy is designed to intercept HTTP requests from clients, parse and verify
 those requests, and (if valid) send requests to the client's desired web server
 and then return the web server's response to the client. Upon receiving an
