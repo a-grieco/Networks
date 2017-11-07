@@ -41,11 +41,11 @@ bool get_parsed_data(std::string client_msg, std::string& webserv_host,
     webserv_host = host;
     webserv_port = port;
     if(DEBUG_MODE) {
-      printf("in <parse.cpp> parse_client_msg successful\n");
-      printf("\thost: %s\n\tpath: %s\n\tport: %s\n\theaders:\n",
+      printf("in <parse.cpp> parse_client_msg successful\r\n");
+      printf("\thost: %s\r\n\tpath: %s\r\n\tport: %s\r\n\theaders:\r\n",
         host.c_str(), path.c_str(), port.c_str());
       for(int i = 0; i < headers.size(); ++i) {
-        printf("\t%s%s%s\n", i == 0 ? "[" : " ", headers.at(i).c_str(),
+        printf("\t%s%s%s\r\n", i == 0 ? "[" : " ", headers.at(i).c_str(),
           i == (headers.size()-1) ? "]" : " ");
       }
     }
@@ -54,7 +54,7 @@ bool get_parsed_data(std::string client_msg, std::string& webserv_host,
   }
 
   // otherwise, if parse unsuccessful, return false
-  if(DEBUG_MODE) { printf("in <parse.cpp> parse_client_msg detected error\n"); }
+  if(DEBUG_MODE) { printf("in <parse.cpp> parse_client_msg detected error\r\n"); }
   if(INCLUDE_PARSING_ERROR_MSGS) { get_parse_error_msg(data, err); }
   return false;
 }
@@ -67,18 +67,18 @@ void generate_webserver_request(std::string& data, std::string& host,
   std::string method = VALID_METHOD, http_vers = VALID_HTTP_VERS;
   std::string webserv_req;
   if(is_match_caseins(DEFAULT_PORT, port)) {
-    webserv_req= method + " /" + path + " " + http_vers + "\nHost: " + host +
-      "\nConnection: close\n";
+    webserv_req= method + " /" + path + " " + http_vers + "\r\nHost: " + host +
+      "\r\nConnection: close\r\n";
   }
   else {  // include port # in Host: header if not default port '80'
-    webserv_req= method + " /" + path + " " + http_vers + "\nHost: " + host +
-      ":" + port + "\nConnection: close\n";
+    webserv_req= method + " /" + path + " " + http_vers + "\r\nHost: " + host +
+      ":" + port + "\r\nConnection: close\r\n";
   }
   for(std::vector<std::string>::iterator it = headers.begin();
     it != headers.end(); ++it) {
-      webserv_req += *it + "\n";
+      webserv_req += *it + "\r\n";
   }
-  webserv_req += "\n";
+  webserv_req += "\r\n";
   data = webserv_req;
 }
 
@@ -87,43 +87,43 @@ void get_parse_error_msg(std::string& data, Parse_Error& err) {
   switch(err) {
     case e_req_line:
       data += "Invalid request line: expecting <METHOD> <URL> <HTTP VERSION>"
-              "\ni.e. 'GET http://hostname[:port]/path HTTP/1.0'\n";
+              "\r\ni.e. 'GET http://hostname[:port]/path HTTP/1.0'\r\n";
       break;
     case e_method:
-      data += "Invalid HTTP method: only GET accepted\n";
+      data += "Invalid HTTP method: only GET accepted\r\n";
       break;
     case e_url:
       data += "Invalid URL: must use absolute URI formatted as "
-              "http://hostname[:port]/path\n";
+              "http://hostname[:port]/path\r\n";
       break;
     case e_http_vers:
-      data += "Invalid HTTP version: only HTTP/1.0 accepted\n";
+      data += "Invalid HTTP version: only HTTP/1.0 accepted\r\n";
       break;
     case e_http_prefix:
-      data += "Invalid protocol prefix in URL: only 'http://' accepted\n";
+      data += "Invalid protocol prefix in URL: only 'http://' accepted\r\n";
       break;
     case e_host:
-      data += "Missing host\n";
+      data += "Missing host\r\n";
       break;
     case e_dns:
-      data += "Failed to resolve the hostname with DNS\n";
+      data += "Failed to resolve the hostname with DNS\r\n";
       break;
     case e_path:
-      data += "Missing path: absolute URI required\n"
-              "i.e. http://hostname[:port]/path\n";
+      data += "Missing path: absolute URI required\r\n"
+              "i.e. http://hostname[:port]/path\r\n";
       break;
     case e_port:
-      data += "Invalid port number, must be numeric\n";
+      data += "Invalid port number, must be numeric\r\n";
       break;
     case e_headers:
-      data += "Invalid formatting of header(s). Expected <NAME>: <VALUE>\n";
+      data += "Invalid formatting of header(s). Expected <NAME>: <VALUE>\r\n";
       break;
     case e_name_ws:
-      data += "Header name may not contain embedded whitespace,\n"
-              "i.e. 'Content-type' ok, 'Content type' results in error\n";
+      data += "Header name may not contain embedded whitespace,\r\n"
+              "i.e. 'Content-type' ok, 'Content type' results in error\r\n";
       break;
     case e_header_val:
-      data += "Header missing value. Expected <NAME>: <VALUE>\n";
+      data += "Header missing value. Expected <NAME>: <VALUE>\r\n";
       break;
   }
 }
@@ -137,7 +137,7 @@ bool parse_client_msg(std::string msg, std::string& host, std::string& path,
 
   // get first line of client request
   std::string delimiter = "\r\n";   // standard cr lf
-  std::string alt_delimiter = "\n"; // handle (non-standard) lf
+  std::string alt_delimiter = "\r\n"; // handle (non-standard) lf
   std::size_t pos = msg.find(delimiter);
   if(pos == std::string::npos) {
     delimiter = alt_delimiter;
@@ -227,7 +227,7 @@ bool parse_url(std::string url, std::string& host, std::string& path,
 bool extract_headers(std::string msg, std::vector<std::string> &headers) {
   std::string eol_delim_used;
   std::string eol_delim = "\r\n";   // standard is cr lf
-  std::string alt_eol_delim = "\n"; // handle (non-standard) lf
+  std::string alt_eol_delim = "\r\n"; // handle (non-standard) lf
   std::size_t pos = 0;
 
   if(msg.empty()) { return false; }

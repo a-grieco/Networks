@@ -25,6 +25,8 @@
 #include <pthread.h>
 #include <thread>
 #include <chrono>
+#include "cerrno"
+#include <atomic>
 
 #include "parse.h"
 
@@ -42,20 +44,15 @@ const int MAX_BLANK_RECVS = 3;  // max consecutive 0 bytes recv() allowed
 
 const int DEFAULT_PORT_NUMBER = 10042;
 
-const int CONNECTIONS_ALLOWED = 300;
-const int MAX_THREADS_SUPPORTED = 300;
+const int CONNECTIONS_ALLOWED = 100;
+const int MAX_THREADS_SUPPORTED = 100;
 
 const int MAX_SLEEP_SECONDS = 5;  // wait before attempt to create thread
 
-const int BUFFERSIZE = 500000;
-const int BODY_BUFFERSIZE = 500000;
+const int BUFFERSIZE = 5000;
+const int BODY_BUFFERSIZE = 5000;
 
 enum Proxy_Error { e_serv_connect, e_serv_send, e_serv_recv, e_empty_req };
-
-int thread_count = -1;  // initial connection brings count to 0
-pthread_mutex_t count_mutex = PTHREAD_MUTEX_INITIALIZER;
-void decrement_thread_count();
-bool increment_thread_count_successful();
 
 void* thread_connect (void * new_sockfd_ptr);
 
@@ -78,13 +75,19 @@ void get_proxy_error_msg(std::string msg, Proxy_Error& err);
 int send_all(int socket, char *data_buf, int *length);
 void clean_exit(int flag);
 
+
+/*
+ * Easier way to count threads
+ */
+std::atomic_int threadCount {0};
+
 int main(int argc, char * argv[]) {
 
   int port_int = DEFAULT_PORT_NUMBER; // default used without user argument
   char port_buf[5];
 
   if(argc > 2) {
-    fprintf(stderr, "usage: %s or %s proxy_port\n", argv[0]);
+    fprintf(stderr, "usage: %s or %s proxy_port\n", argv[0], argv[0]);
     exit(EXIT_FAILURE);
   }
 
@@ -140,14 +143,15 @@ int main(int argc, char * argv[]) {
     socklen_t addr_size;
     addr_size = sizeof client_addr;
 
+    // TODO - for now, ignore sleeping
     // only allow MAX_THREADS_SUPPORTED to exist simultaneously
-    int sleep_seconds = 0;
-    while(!(increment_thread_count_successful())) {
-     // wait before trying again (1 sec -> MAX_SLEEP_SECONDS)
-     if(sleep_seconds < MAX_SLEEP_SECONDS) { ++sleep_seconds; }
-     else { sleep_seconds = sleep_seconds / 2; }
-     std::this_thread::sleep_for(std::chrono::seconds(sleep_seconds));
-    }
+//    int sleep_seconds = 0;
+//    while(!(increment_thread_count_successful())) {
+//     // wait before trying again (1 sec -> MAX_SLEEP_SECONDS)
+//     if(sleep_seconds < MAX_SLEEP_SECONDS) { ++sleep_seconds; }
+//     else { sleep_seconds = sleep_seconds / 2; }
+//     std::this_thread::sleep_for(std::chrono::seconds(sleep_seconds));
+//    }
 
     new_sockfd = accept(client_sockfd, (struct sockaddr *)&client_addr,
       &addr_size);
@@ -156,72 +160,74 @@ int main(int argc, char * argv[]) {
       continue;
     }
 
+
+
     int err;
     pthread_t thread_id;
-    if((err = pthread_create(&thread_id, &attr, thread_connect, (void*)(size_t)new_sockfd))) {
-      if(DEBUG_MODE) { printf("Thread creation failed: %s\n", err); }
+    void * threadArgument = (void*)(size_t)new_sockfd;
+    if((err = pthread_create(&thread_id, &attr,
+                             thread_connect, threadArgument))) {
+
+//    if((err = pthread_create(&thread_id, &attr,
+//                             thread_connect, (void*)(size_t)new_sockfd))) {
+      if(DEBUG_MODE) { perror("Thread creation failed"); }
       close(new_sockfd);
     }
+
+    // NOTE: uncomment to go back to single-threaded way
+//    void * threadResult = thread_connect(threadArgument);
+
+
   }
-
-  pthread_attr_destroy(&attr);  // code should not reach this point
-  pthread_exit(NULL);
-
-  //signal(SIGTERM, clean_exit);
-  //signal(SIGINT, clean_exit);
-
-  return 0;
 }
 
-/* Decrements the thread count atomically */
-void decrement_thread_count() {
-  pthread_mutex_lock(&count_mutex);
-  --thread_count;
-  if(DEBUG_MODE) { printf("Thread count decremented to %d\n", thread_count); }
-  pthread_mutex_unlock(&count_mutex);
+
+// Clean exit
+void * exitThisThread(int browserFd = -1, int websiteFd = -1) {
+//  decrement_thread_count();
+  if (browserFd != -1) {
+    close(browserFd);
+    std::cout << "Closing browserFd  " << browserFd << std::endl;
+  }
+  if (websiteFd != -1) {
+    close(websiteFd);
+    std::cout << "Closing websiteFd  " << websiteFd << std::endl;
+
+  }
+  std::cout << "Exiting thread .. " << std::flush;
+  perror("threadexit");
+
+  std::cout << "Thread count is now: " << --threadCount << std::endl;
+
+
+  return nullptr;
 }
 
-/* Increments the thread_count atomically and returns true if the resulting
- * count is within MAX_THREADS_SUPPORTED (inclusive); otherwise the count
- * remains unchanged and the function returns false */
-bool increment_thread_count_successful() {
-  pthread_mutex_lock(&count_mutex);
-  bool success = false;
-  if(thread_count < MAX_THREADS_SUPPORTED) {
-    ++thread_count;
-    success = true;
-  }
-  if(DEBUG_MODE) {
-    if(!success) { printf("Thread count MAXED OUT at %d.\n", thread_count); }
-    else { printf("Thread count incremented to %d\n", thread_count);}
-  }
-  pthread_mutex_unlock(&count_mutex);
-  return success;
-}
 
 /* When successful, enables a thread to connect to a webserver, request data,
  * and return that data to a client. If unsuccessful, sends error to client. */
 void* thread_connect (void * new_sockfd_ptr) {
 
   int new_sockfd = (int)(size_t) new_sockfd_ptr;
+
+
+  std::cout << "New thread created, count is now: "
+            << ++threadCount << std::endl;
+
   int webserv_sockfd;
   std::string req_headers, body, webserv_host, webserv_port, data;
   char req_headers_buf[BUFFERSIZE];
   char body_buf[BODY_BUFFERSIZE];
   if(!get_msg_from_client(new_sockfd, req_headers, body)) {
-    close(new_sockfd);
-    decrement_thread_count();
-    pthread_exit(NULL);
+    return exitThisThread(new_sockfd);
   }
 
   // check if request and header lines are long enough to be valid
   if(req_headers.size() <= strlen("GET http://x/ HTTP/1.0")) {
-    close(new_sockfd);
-    decrement_thread_count();
     Proxy_Error err = e_empty_req;
     send_error_to_client(new_sockfd, err);
     if(DEBUG_MODE) { printf("Rejected empty request line.\n"); }
-    pthread_exit(NULL);
+    return exitThisThread(new_sockfd);
   }
 
   // parse request and header lines
@@ -233,18 +239,14 @@ void* thread_connect (void * new_sockfd_ptr) {
       printf("+++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++\n");
     }
     send_error_to_client(new_sockfd, data);
-    close(new_sockfd);
-    decrement_thread_count();
-    pthread_exit(NULL);
+    return exitThisThread(new_sockfd);
   } // parsing successful; generated HTTP request ('data') for request/headers
 
   // connect to web server
   if(!connect_to_web_server(webserv_host, webserv_port, webserv_sockfd)) {
     Proxy_Error err = e_serv_connect;
     send_error_to_client(new_sockfd, err);
-    close(new_sockfd);
-    decrement_thread_count();
-    pthread_exit(NULL);
+    return exitThisThread(new_sockfd, webserv_sockfd);
   }
 
   // include body in web server request (if present)
@@ -261,22 +263,18 @@ void* thread_connect (void * new_sockfd_ptr) {
     if(DEBUG_MODE) { perror("Sending HTTP request to server.\n\tsend_all"); }
     Proxy_Error err = e_serv_send;
     send_error_to_client(new_sockfd, err);
-    close(new_sockfd);
-    decrement_thread_count();
-    pthread_exit(NULL);
+    return exitThisThread(new_sockfd, webserv_sockfd);
   }
+
+
 
   // get response from webserver and redirect to client
   if(!send_webserver_data_to_client(webserv_sockfd, new_sockfd)) {
-    close(new_sockfd);
-    decrement_thread_count();
-    pthread_exit(NULL);
+    return exitThisThread(new_sockfd, webserv_sockfd);
   }
 
   // release client, transaction complete
-  close(new_sockfd);
-  decrement_thread_count();
-  pthread_exit(NULL);
+  return exitThisThread(new_sockfd, webserv_sockfd);
 }
 
 /* Assigns user specified port number and returns true if argument valid, i.e.
@@ -323,6 +321,17 @@ void create_and_bind_to_socket(int& client_sockfd, const char* port_buf) {
       perror("socket");
       continue;
     }
+
+    // Makes it to where you don't have to keep changing port numbers every
+    // time you run the program
+    int optVal = 1;
+    if (setsockopt(client_sockfd, SOL_SOCKET, SO_REUSEADDR, &optVal,
+                   sizeof(optVal)) == -1){
+      perror("setsockopt");
+      close(client_sockfd);
+      continue;
+    }
+
     if(bind(client_sockfd, p->ai_addr, p->ai_addrlen) == -1) {
       perror("bind");
       close(client_sockfd);
@@ -503,13 +512,16 @@ bool send_webserver_data_to_client(int webserv_sockfd, int new_sockfd) {
   int numbytes;
 
   char mssg_buf[BUFFERSIZE];
-  memset(mssg_buf, 0, sizeof mssg_buf);
+  memset(mssg_buf, 0xCC, sizeof mssg_buf);
 
   bool message_completed = false;
 
   while(!message_completed) {
     if((numbytes = recv(webserv_sockfd, mssg_buf, BUFFERSIZE-1, 0)) == -1) {
-      if(DEBUG_MODE) { perror("Retrieving data from web server.\n\trecv"); }
+
+      if(DEBUG_MODE) {
+        perror("Retrieving data from web server.\n\trecv");
+      }
       Proxy_Error err = e_serv_recv;
       send_error_to_client(new_sockfd, err);
       return false;
