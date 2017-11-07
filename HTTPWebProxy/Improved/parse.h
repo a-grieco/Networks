@@ -5,7 +5,7 @@
 #define PARSE_H
 
 enum Parse_Error { e_req_line, e_method, e_url, e_http_vers, e_http_prefix,
-  e_host, e_dns, e_path, e_port, e_headers, e_name_ws, e_header_val };
+  e_host, e_dns, e_path, e_port, e_headers, e_header_incomplete };
 
 bool get_parsed_data(std::string client_msg, std::string& webserv_host,
   std::string& webserv_port, std::string& data);

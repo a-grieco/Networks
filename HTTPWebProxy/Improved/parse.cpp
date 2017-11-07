@@ -118,12 +118,8 @@ void get_parse_error_msg(std::string& data, Parse_Error& err) {
     case e_headers:
       data += "Invalid formatting of header(s). Expected <NAME>: <VALUE>\r\n";
       break;
-    case e_name_ws:
-      data += "Header name may not contain embedded whitespace,\r\n"
-              "i.e. 'Content-type' ok, 'Content type' results in error\r\n";
-      break;
-    case e_header_val:
-      data += "Header missing value. Expected <NAME>: <VALUE>\r\n";
+    case e_header_incomplete:
+      data += "Header incomplete. Expected <NAME>: <VALUE>\r\n";
       break;
   }
 }
@@ -137,7 +133,7 @@ bool parse_client_msg(std::string msg, std::string& host, std::string& path,
 
   // get first line of client request
   std::string delimiter = "\r\n";   // standard cr lf
-  std::string alt_delimiter = "\r\n"; // handle (non-standard) lf
+  std::string alt_delimiter = "\n"; // handle (non-standard) lf
   std::size_t pos = msg.find(delimiter);
   if(pos == std::string::npos) {
     delimiter = alt_delimiter;
@@ -227,7 +223,7 @@ bool parse_url(std::string url, std::string& host, std::string& path,
 bool extract_headers(std::string msg, std::vector<std::string> &headers) {
   std::string eol_delim_used;
   std::string eol_delim = "\r\n";   // standard is cr lf
-  std::string alt_eol_delim = "\r\n"; // handle (non-standard) lf
+  std::string alt_eol_delim = "\n"; // handle (non-standard) lf
   std::size_t pos = 0;
 
   if(msg.empty()) { return false; }
@@ -358,15 +354,13 @@ bool verify_http_vers(std::string& http_vers) {
   return is_match_caseins(VALID_HTTP_VERS, http_vers);
 }
 
-/* returns true if each header has valid format [name: value] where name has no
- * embedded whitespaces; otherwise returns false
- * Note: formats header to remove any whitespace between the name and ":" and
- * removes any duplicate 'Host' or 'Connection' headers */
+/* returns true if each header has valid format [name: value] and removes any
+ * duplicate 'Host' or 'Connection' headers; otherwise returns false */
 bool verify_headers(std::vector<std::string> &headers, Parse_Error& err) {
   std::size_t pos = 0;
   std::string name_delim = ":";
-  std::string whitespace = " \r\n\t";
-  std::string def_host = "Host", def_conn = "Connection", def_proxy_conn = "Proxy-Connection";
+  std::string def_host = "Host", def_conn = "Connection",
+    def_proxy_conn = "Proxy-Connection";
   std::vector<int> dup_headers_found;
 
   std::string orig_header, name, value;
@@ -381,20 +375,13 @@ bool verify_headers(std::vector<std::string> &headers, Parse_Error& err) {
       return false;
     }
 
+    if(pos == 0 || pos >= orig_header.length()) {
+      err = e_header_incomplete;
+      return false;
+    }
+
     name = orig_header.substr(0, pos);
     value = orig_header.substr(pos);  // includes ":"
-
-    trim(name);
-    pos = name.find_first_of(whitespace);
-    if(pos != std::string::npos) {  // name has internal spaces
-      err = e_name_ws;
-      return false;
-    }
-    pos = value.find_first_not_of(whitespace);
-    if(pos == std::string::npos) {  // header has no value
-      err = e_header_val;
-      return false;
-    }
 
     headers.at(i) = name + value;
 

@@ -1,6 +1,6 @@
 /* Madeline Wong, Matthew Irwin, Adrienne Grieco
  * Phase 2: Implementing a Simple, Multithreaded HTTP Web Proxy
- * 11/05/2017
+ * 11/06/2017
  * proxy.cpp */
 
 // proxy receives data requests from client and uses HTTP to retrieve and
@@ -54,11 +54,10 @@ const int BODY_BUFFERSIZE = 5000;
 
 enum Proxy_Error { e_serv_connect, e_serv_send, e_serv_recv, e_empty_req };
 
-void* thread_connect (void * new_sockfd_ptr);
 
 bool port_number_is_valid(int& port_int, int port_number_arg);
 void set_port_number(char* port_buf, int port_int);
-
+void* thread_connect (void * new_sockfd_ptr);
 void create_and_bind_to_socket(int& client_sockfd, const char* port_buf);
 bool get_msg_from_client(int client_sockfd, std::string& req_header_mssg,
   std::string& body_mssg);
@@ -67,18 +66,14 @@ bool connect_to_web_server(std::string webserv_host, std::string webserv_port,
 bool send_webserver_data_to_client(int webserv_sockfd, int new_sockfd);
 void send_error_to_client(int& client_sockfd, std::string& parse_err);
 void send_error_to_client(int& client_sockfd, Proxy_Error& err);
-
 bool req_header_end_detected(std::string& msg, std::string& end_used,
   size_t& msg_end_found);
 int get_bytes_in_body(std::string& msg, size_t msg_end);
 void get_proxy_error_msg(std::string msg, Proxy_Error& err);
 int send_all(int socket, char *data_buf, int *length);
-void clean_exit(int flag);
 
 
-/*
- * Easier way to count threads
- */
+// thread counting
 std::atomic_int threadCount {0};
 
 int main(int argc, char * argv[]) {
@@ -106,7 +101,7 @@ int main(int argc, char * argv[]) {
   if (sigaction(SIGPIPE, &sa, nullptr) == -1)
   {
     perror("sigaction");
-	exit(1);
+	exit(EXIT_FAILURE);
   }
 
   int client_sockfd;
@@ -131,9 +126,6 @@ int main(int argc, char * argv[]) {
     exit(EXIT_FAILURE);
   }
 
-  //signal(SIGPIPE, SIG_IGN); // ignore signals to shut down proxy
-
-  
 
   // accept incoming connections
   while(true) {
@@ -143,16 +135,6 @@ int main(int argc, char * argv[]) {
     socklen_t addr_size;
     addr_size = sizeof client_addr;
 
-    // TODO - for now, ignore sleeping
-    // only allow MAX_THREADS_SUPPORTED to exist simultaneously
-//    int sleep_seconds = 0;
-//    while(!(increment_thread_count_successful())) {
-//     // wait before trying again (1 sec -> MAX_SLEEP_SECONDS)
-//     if(sleep_seconds < MAX_SLEEP_SECONDS) { ++sleep_seconds; }
-//     else { sleep_seconds = sleep_seconds / 2; }
-//     std::this_thread::sleep_for(std::chrono::seconds(sleep_seconds));
-//    }
-
     new_sockfd = accept(client_sockfd, (struct sockaddr *)&client_addr,
       &addr_size);
     if(new_sockfd == -1) {
@@ -160,122 +142,22 @@ int main(int argc, char * argv[]) {
       continue;
     }
 
-
-
     int err;
     pthread_t thread_id;
     void * threadArgument = (void*)(size_t)new_sockfd;
     if((err = pthread_create(&thread_id, &attr,
                              thread_connect, threadArgument))) {
-
-//    if((err = pthread_create(&thread_id, &attr,
-//                             thread_connect, (void*)(size_t)new_sockfd))) {
       if(DEBUG_MODE) { perror("Thread creation failed"); }
       close(new_sockfd);
     }
 
     // NOTE: uncomment to go back to single-threaded way
-//    void * threadResult = thread_connect(threadArgument);
-
+    // void * threadResult = thread_connect(threadArgument);
 
   }
 }
 
 
-// Clean exit
-void * exitThisThread(int browserFd = -1, int websiteFd = -1) {
-//  decrement_thread_count();
-  if (browserFd != -1) {
-    close(browserFd);
-    std::cout << "Closing browserFd  " << browserFd << std::endl;
-  }
-  if (websiteFd != -1) {
-    close(websiteFd);
-    std::cout << "Closing websiteFd  " << websiteFd << std::endl;
-
-  }
-  std::cout << "Exiting thread .. " << std::flush;
-  perror("threadexit");
-
-  std::cout << "Thread count is now: " << --threadCount << std::endl;
-
-
-  return nullptr;
-}
-
-
-/* When successful, enables a thread to connect to a webserver, request data,
- * and return that data to a client. If unsuccessful, sends error to client. */
-void* thread_connect (void * new_sockfd_ptr) {
-
-  int new_sockfd = (int)(size_t) new_sockfd_ptr;
-
-
-  std::cout << "New thread created, count is now: "
-            << ++threadCount << std::endl;
-
-  int webserv_sockfd;
-  std::string req_headers, body, webserv_host, webserv_port, data;
-  char req_headers_buf[BUFFERSIZE];
-  char body_buf[BODY_BUFFERSIZE];
-  if(!get_msg_from_client(new_sockfd, req_headers, body)) {
-    return exitThisThread(new_sockfd);
-  }
-
-  // check if request and header lines are long enough to be valid
-  if(req_headers.size() <= strlen("GET http://x/ HTTP/1.0")) {
-    Proxy_Error err = e_empty_req;
-    send_error_to_client(new_sockfd, err);
-    if(DEBUG_MODE) { printf("Rejected empty request line.\n"); }
-    return exitThisThread(new_sockfd);
-  }
-
-  // parse request and header lines
-  if(!get_parsed_data(req_headers, webserv_host, webserv_port, data)) {
-    if(DEBUG_MODE) {
-      printf("+++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++\n");
-      printf("PARSE ERROR:\n%s\n", data.c_str());
-      printf("RECEIVED:\t%s\n", req_headers.c_str());
-      printf("+++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++\n");
-    }
-    send_error_to_client(new_sockfd, data);
-    return exitThisThread(new_sockfd);
-  } // parsing successful; generated HTTP request ('data') for request/headers
-
-  // connect to web server
-  if(!connect_to_web_server(webserv_host, webserv_port, webserv_sockfd)) {
-    Proxy_Error err = e_serv_connect;
-    send_error_to_client(new_sockfd, err);
-    return exitThisThread(new_sockfd, webserv_sockfd);
-  }
-
-  // include body in web server request (if present)
-  if(!body.empty() > 0) { data += body; }
-  if(DEBUG_MODE) {
-    printf("......................web server request.......................\n");
-    printf("%s", data.c_str());
-    printf("...............................................................\n");
-  }
-
-  // send HTTP request to web server
-  int length = data.length();
-  if(send_all(webserv_sockfd, (char*)data.c_str(), &length) == -1) {
-    if(DEBUG_MODE) { perror("Sending HTTP request to server.\n\tsend_all"); }
-    Proxy_Error err = e_serv_send;
-    send_error_to_client(new_sockfd, err);
-    return exitThisThread(new_sockfd, webserv_sockfd);
-  }
-
-
-
-  // get response from webserver and redirect to client
-  if(!send_webserver_data_to_client(webserv_sockfd, new_sockfd)) {
-    return exitThisThread(new_sockfd, webserv_sockfd);
-  }
-
-  // release client, transaction complete
-  return exitThisThread(new_sockfd, webserv_sockfd);
-}
 
 /* Assigns user specified port number and returns true if argument valid, i.e.
  * the number is between 10000 and 13000 (inclusive); otherwise returns false */
@@ -295,6 +177,100 @@ void set_port_number(char* port_buf, int port_int) {
      exit(EXIT_FAILURE);
    }
    if(DEBUG_MODE) { printf("Proxy connecting to port: %s\n", port_buf); }
+ }
+
+ /* Clean exit */
+ void * exit_this_thread(int browserFd = -1, int websiteFd = -1) {
+   if (browserFd != -1) {
+     close(browserFd);
+     if(DEBUG_MODE) {
+       std::cout << "Closing browserFd  " << browserFd << std::endl;
+     }
+   }
+   if (websiteFd != -1) {
+     close(websiteFd);
+     if(DEBUG_MODE) {
+       std::cout << "Closing websiteFd  " << websiteFd << std::endl;
+     }
+   }
+   if(DEBUG_MODE) {
+     std::cout << "Exiting thread .. " << std::flush;
+     perror("threadexit");
+     std::cout << "Thread count is now: " << --threadCount << std::endl;
+   }
+   return nullptr;
+ }
+
+ /* When successful, enables a thread to connect to a webserver, request data,
+  * and return that data to a client. If unsuccessful, sends error to client. */
+ void* thread_connect (void * new_sockfd_ptr) {
+
+   int new_sockfd = (int)(size_t) new_sockfd_ptr;
+
+   if(DEBUG_MODE) {
+     std::cout << "New thread created, count is now: "
+               << ++threadCount << std::endl;
+   }
+
+   int webserv_sockfd;
+   std::string req_headers, body, webserv_host, webserv_port, data;
+   char req_headers_buf[BUFFERSIZE];
+   char body_buf[BODY_BUFFERSIZE];
+   if(!get_msg_from_client(new_sockfd, req_headers, body)) {
+     return exit_this_thread(new_sockfd);
+   }
+
+   // check if request and header lines are long enough to be valid
+   if(req_headers.size() <= strlen("GET http://x/ HTTP/1.0")) {
+     Proxy_Error err = e_empty_req;
+     send_error_to_client(new_sockfd, err);
+     if(DEBUG_MODE) { printf("Rejected empty request line.\n"); }
+     return exit_this_thread(new_sockfd);
+   }
+
+   // parse request and header lines
+   if(!get_parsed_data(req_headers, webserv_host, webserv_port, data)) {
+     if(DEBUG_MODE) {
+       printf("+++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++\n");
+       printf("PARSE ERROR:\n%s\n", data.c_str());
+       printf("RECEIVED:\t%s\n", req_headers.c_str());
+       printf("+++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++\n");
+     }
+     send_error_to_client(new_sockfd, data);
+     return exit_this_thread(new_sockfd);
+   } // parsing successful; generated HTTP request ('data') for request/headers
+
+   // connect to web server
+   if(!connect_to_web_server(webserv_host, webserv_port, webserv_sockfd)) {
+     Proxy_Error err = e_serv_connect;
+     send_error_to_client(new_sockfd, err);
+     return exit_this_thread(new_sockfd, webserv_sockfd);
+   }
+
+   // include body in web server request (if present)
+   if(!body.empty() > 0) { data += body; }
+   if(DEBUG_MODE) {
+     printf("......................web server request.......................\n");
+     printf("%s", data.c_str());
+     printf("...............................................................\n");
+   }
+
+   // send HTTP request to web server
+   int length = data.length();
+   if(send_all(webserv_sockfd, (char*)data.c_str(), &length) == -1) {
+     if(DEBUG_MODE) { perror("Sending HTTP request to server.\n\tsend_all"); }
+     Proxy_Error err = e_serv_send;
+     send_error_to_client(new_sockfd, err);
+     return exit_this_thread(new_sockfd, webserv_sockfd);
+   }
+
+   // get response from webserver and redirect to client
+   if(!send_webserver_data_to_client(webserv_sockfd, new_sockfd)) {
+     return exit_this_thread(new_sockfd, webserv_sockfd);
+   }
+
+   // release client, transaction complete
+   return exit_this_thread(new_sockfd, webserv_sockfd);
  }
 
 /* Creates a socket for the proxy and binds to it based on the defined port
@@ -322,8 +298,7 @@ void create_and_bind_to_socket(int& client_sockfd, const char* port_buf) {
       continue;
     }
 
-    // Makes it to where you don't have to keep changing port numbers every
-    // time you run the program
+    // avoid the need to change port numbers when rerunning program
     int optVal = 1;
     if (setsockopt(client_sockfd, SOL_SOCKET, SO_REUSEADDR, &optVal,
                    sizeof(optVal)) == -1){
@@ -341,13 +316,12 @@ void create_and_bind_to_socket(int& client_sockfd, const char* port_buf) {
   }
   freeaddrinfo(servinfo); // free memory
 
-  // if p reached NULL, failed to bind with results in list
+  // if p reached NULL, failed to bind with result in list
   if(p == NULL) {
     fprintf(stderr, "failed to bind socket\n");
     exit(EXIT_FAILURE);
   }
 }
-
 
 /* If successful, gets HTTP message from client, assigns result to strings
  * (one for the request and header lines: 'req_header_mssg', and one for the
@@ -418,40 +392,6 @@ bool get_msg_from_client(int client_sockfd, std::string& req_header_mssg,
     printf("_______________________________________________________________\n");
   }
   return true;
-}
-
-/* Checks the portion of the client message received for the end of the request
- * and header lines and returns true if found or false if not. */
-bool req_header_end_detected(std::string& msg, std::string& end_used,
-  size_t& msg_end_found) {
-  std::string req_header_mssg_end = "\r\n\r\n"; // cr lf = standard
-  std::string alt_req_header_mssg_end = "\n\n"; // gracefully handle lf only
-  msg_end_found = msg.find(req_header_mssg_end);
-  if(msg_end_found != std::string::npos) {
-    end_used = req_header_mssg_end;
-    return true;
-  }
-  msg_end_found = msg.find(alt_req_header_mssg_end);
-  if(msg_end_found != std::string::npos) {
-    end_used = alt_req_header_mssg_end;
-    return true;
-  }
-  return false;
-}
-
-/* Accepts the HTTP request starting at the first position of HTTP_BODY_HEADER
- * and returns the number of bytes in the body as indicated by the header. */
-int get_bytes_in_body(std::string& msg, size_t header_start) {
-  int num_bytes_in_body;
-  // get past header name (<HEADER NAME>: <HEADER VALUE>)
-  std::string bytes_start = msg.substr(header_start + HTTP_BODY_HEADER.size());
-  // get past ":" ( varying spaces possible before/after -> '[*]:[*]')
-  size_t colon_found = bytes_start.find(":");
-  bytes_start = bytes_start.substr(colon_found + 1);
-  // <HEADER VALUE> indicates the number of bytes in the body (ends with [\r]\n)
-  std::istringstream iss(bytes_start.substr(0, bytes_start.find('\n')));
-  iss >> num_bytes_in_body;
-  return num_bytes_in_body;
 }
 
 /* Establishes connection to the client's requested web server */
@@ -570,6 +510,40 @@ void send_error_to_client(int& client_sockfd, Proxy_Error& err) {
   }
 }
 
+/* Checks the portion of the client message received for the end of the request
+ * and header lines and returns true if found or false if not. */
+bool req_header_end_detected(std::string& msg, std::string& end_used,
+  size_t& msg_end_found) {
+  std::string req_header_mssg_end = "\r\n\r\n"; // cr lf = standard
+  std::string alt_req_header_mssg_end = "\n\n"; // gracefully handle lf only
+  msg_end_found = msg.find(req_header_mssg_end);
+  if(msg_end_found != std::string::npos) {
+    end_used = req_header_mssg_end;
+    return true;
+  }
+  msg_end_found = msg.find(alt_req_header_mssg_end);
+  if(msg_end_found != std::string::npos) {
+    end_used = alt_req_header_mssg_end;
+    return true;
+  }
+  return false;
+}
+
+/* Accepts the HTTP request starting at the first position of HTTP_BODY_HEADER
+ * and returns the number of bytes in the body as indicated by the header. */
+int get_bytes_in_body(std::string& msg, size_t header_start) {
+  int num_bytes_in_body;
+  // get past header name (<HEADER NAME>: <HEADER VALUE>)
+  std::string bytes_start = msg.substr(header_start + HTTP_BODY_HEADER.size());
+  // get past ":" ( varying spaces possible before/after -> '[*]:[*]')
+  size_t colon_found = bytes_start.find(":");
+  bytes_start = bytes_start.substr(colon_found + 1);
+  // <HEADER VALUE> indicates the number of bytes in the body (ends with [\r]\n)
+  std::istringstream iss(bytes_start.substr(0, bytes_start.find('\n')));
+  iss >> num_bytes_in_body;
+  return num_bytes_in_body;
+}
+
 /* returns an appropriate error message (as a string) for the given err */
 void get_proxy_error_msg(std::string msg, Proxy_Error& err) {
   switch(err) {
@@ -604,9 +578,4 @@ int send_all(int socket, char *data_buf, int *length) {
 
   *length = total_bytes_sent;
   return numbytes == -1 ? -1 : 0;
-}
-
-/* Helps to ensure port is freed upoon a "rough" exit from a program */
-void clean_exit(int flag) {
-  exit(EXIT_SUCCESS);
 }
