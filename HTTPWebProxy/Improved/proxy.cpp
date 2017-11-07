@@ -30,7 +30,7 @@
 
 #include "parse.h"
 
-const bool DEBUG_MODE = true;
+const bool DEBUG_MODE = false;
 const bool INCLUDE_PROXY_ERROR_MSGS = false;
 
 const std::string STANDARD_ERROR_MESSAGE = "HTTP/1.0 500 Internal error\n";

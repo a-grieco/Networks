@@ -19,6 +19,12 @@ REFERENCED: Beej's Guide to Network Programming, 8 June 2016,
             HTTP Made Really Easy, 12 October 2012
             http://www.jmarshall.com/easy/http/
 
+            POSIX Threads Programming
+            https://computing.llnl.gov/tutorials/pthreads/
+
+            POSIX thread (pthread) libraries
+            http://www.cs.cmu.edu/afs/cs/academic/class/15492-f07/www/pthreads.html
+
 CONTENTS
 --------
     1. Purpose and Design Decisions
@@ -30,24 +36,26 @@ CONTENTS
 -------------------------------
 
 ***A note on this submission***
-The team is aware of that fact that this resubmission is late by one day. The 
-code that was sent in on Sunday night was not up to the standards that this team had 
-set forth from the start of this project. The 10% point deduction is worth making 
-sure that we are better represented as a group. The proxy now runs significatly faster
-and loads the contents of webpages much more accurately and reliably. 
+The team is aware of that fact that this resubmission is late by one day. The
+code that was sent in on Sunday night was not up to the standards that this team
+had set forth from the start of this project. The 10% point deduction is worth
+making sure that we are better represented as a group. The proxy now runs
+significantly faster and loads the contents of webpages much more accurately
+and reliably.
 
 Some of the improvements that were made in the last day:
-- Sig handlers were not proplery handing SIGPIPE signals, the method that we were 
-  using had been deprecated.
-- The socket used to connect each thread to the requested webserver was not being 
-  properly closed at various points throughot the code. This caused the code to crash 
-  about 2 minutes into utilization due to hitting the file header limit on cs2. 
-- Improved parser's request generator to include proper carriage returns on requests
-  to the server.
-- Adjusted the buffer sizes used throughout the program to better fit their 
+- Sig handlers were not properly handing SIGPIPE signals, the method that we
+  were using had been deprecated.
+- The socket used to connect each thread to the requested webserver was not
+  being properly closed at various points throughout the code. This caused the
+  code to crash about 2 minutes into utilization due to hitting the file header
+  limit on cs2.
+- Improved parser's request generator to include proper carriage returns on
+  requests to the server.
+- Adjusted the buffer sizes used throughout the program to better fit their
   utilization.
-- Removed the static thread limit within the program to allow for better reasource 
-  usage
+- Removed the static thread limit within the program to allow for better
+  resource usage
 
 This proxy is designed to intercept HTTP requests from clients, parse and verify
 those requests, and (if valid) send requests to the client's desired web server
@@ -67,8 +75,8 @@ PROXY:
 Initiation: Initialize the proxy after compiling the project files and pass in
             a port number as an argument.
 Port Number: Must be between 10000 and 13000 (inclusive) or it will be rejected
-Number Connections:  Up to 30 requests can be queued to connect to the proxy at a 
-                     time.
+Number Connections:  Up to 30 requests can be queued to connect to the proxy at
+                     a time.
 Notes on Parsing:
     get_parsed_data: the only function called from parse.cpp in proxy.cpp. If
       the client HTTP request is valid (and has a valid host), the function
@@ -84,8 +92,6 @@ Notes on Parsing:
         * if PATH_REQUIRED set to false-> replaces path with '/' and includes
           a default 'GET / HTTP/1.0' in the request to the web server
     Header lines from client (if present):
-      - name is not accepted if it contains embedded spaces
-      - header is formatted so that there will be no space between name and ':'
       - duplicate 'Host:' and/or 'Connection:' headers are removed and the HTTP
         request sent to the web server defaults to 'Host: <the host provided in
         the absolute URI>' and 'Connection: close'
@@ -94,8 +100,7 @@ Notes on Parsing:
 ---------------------------
 + Checks DNS for valid host name before attempting a connection
 + Handles partial sends and receives (all loops)
-+ Parsing is robust (corrects minor inconsistencies like case and/or spacing)
-  and configurable to allow default '/' in place of absolute path
++ Parsing is robust
 
 + Multithreaded, can take and service multiple requests at one time
 - Does no filtering of content received from web server
@@ -112,14 +117,15 @@ Notes on Parsing:
 
 3. CONTRIBUTIONS
 ----------------
-All of us worked together in phase 1 to come up with the design of the program. Maddie and
-Adrienne focused on parsing and validating the client request. Matt focused on
-accurately rerouting the web server data to the client. Piecing the components
-together and troubleshooting was a collaborative effort. Phase 2 introduced the
-additional complexity of accepting parallel client requests and verifying browser support.
-Matt implemented the parallelism while Maddie and Adrienne spend time making sure that 
-browers requests could be successfully serviced by the proxy. There was significant complexity 
-involved with verfying correctness in this phase.
+All of us worked together in phase 1 to come up with the design of the program.
+Maddie and Adrienne focused on parsing and validating the client request. Matt
+focused on accurately rerouting the web server data to the client. Piecing the
+components together and troubleshooting was a collaborative effort. Phase 2
+introduced the additional complexity of accepting parallel client requests and
+verifying browser support. Matt implemented the parallelism while Maddie and
+Adrienne spend time making sure that browsers requests could be successfully
+serviced by the proxy. There was significant complexity involved with verifying
+correctness in this phase.
 
 4. COMPILING AND RUNNING THE PROGRAM
 ------------------------------------
@@ -134,10 +140,10 @@ Or start the proxy on a specified Port Number by typing into the command line:
     example:  ./proxy 10042
 Note: Port number must be between 10000 and 13000 (inclusive)
 
-After the proxy is running, in a browser window configured to make requests directly to 
-the currently running proxy, send a request to any desired URL:
-    example: configure Mozilla Firefox to route requests to cs2.seattleu.edu and port 10042,
-    then send a request to load 'www.ikea.com'
+After the proxy is running, in a browser window configured to make requests
+directly to the currently running proxy, send a request to any desired URL:
+    example: configure Mozilla Firefox to route requests to cs2.seattleu.edu
+    and port 10042, then send a request to load 'www.ikea.com'
 
-The client side broweser should function as if it was oblivious of the proxy and have 
-the requested webpage loaded.
+The client side browser should function as if it was oblivious of the proxy and
+have the requested webpage loaded.
