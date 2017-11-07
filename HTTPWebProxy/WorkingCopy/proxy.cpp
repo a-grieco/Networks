@@ -42,8 +42,8 @@ const int MAX_BLANK_RECVS = 3;  // max consecutive 0 bytes recv() allowed
 
 const int DEFAULT_PORT_NUMBER = 10042;
 
-const int CONNECTIONS_ALLOWED = 300;
-const int MAX_THREADS_SUPPORTED = 300;
+const int CONNECTIONS_ALLOWED = 100;
+const int MAX_THREADS_SUPPORTED = 100;
 
 const int MAX_SLEEP_SECONDS = 5;  // wait before attempt to create thread
 
@@ -177,6 +177,9 @@ int main(int argc, char * argv[]) {
 void decrement_thread_count() {
   pthread_mutex_lock(&count_mutex);
   --thread_count;
+  if (thread_count > 200 ) {
+    exit(1);
+  }
   if(DEBUG_MODE) { printf("Thread count decremented to %d\n", thread_count); }
   pthread_mutex_unlock(&count_mutex);
 }
@@ -216,10 +219,10 @@ void* thread_connect (void * new_sockfd_ptr) {
 
   // check if request and header lines are long enough to be valid
   if(req_headers.size() <= strlen("GET http://x/ HTTP/1.0")) {
-    close(new_sockfd);
-    decrement_thread_count();
     Proxy_Error err = e_empty_req;
     send_error_to_client(new_sockfd, err);
+    close(new_sockfd);
+    decrement_thread_count();
     if(DEBUG_MODE) { printf("Rejected empty request line.\n"); }
     pthread_exit(NULL);
   }
@@ -242,6 +245,7 @@ void* thread_connect (void * new_sockfd_ptr) {
   if(!connect_to_web_server(webserv_host, webserv_port, webserv_sockfd)) {
     Proxy_Error err = e_serv_connect;
     send_error_to_client(new_sockfd, err);
+    close(webserv_sockfd);
     close(new_sockfd);
     decrement_thread_count();
     pthread_exit(NULL);
@@ -261,6 +265,7 @@ void* thread_connect (void * new_sockfd_ptr) {
     if(DEBUG_MODE) { perror("Sending HTTP request to server.\n\tsend_all"); }
     Proxy_Error err = e_serv_send;
     send_error_to_client(new_sockfd, err);
+    close(webserv_sockfd);
     close(new_sockfd);
     decrement_thread_count();
     pthread_exit(NULL);
@@ -268,12 +273,14 @@ void* thread_connect (void * new_sockfd_ptr) {
 
   // get response from webserver and redirect to client
   if(!send_webserver_data_to_client(webserv_sockfd, new_sockfd)) {
+    close(webserv_sockfd);
     close(new_sockfd);
     decrement_thread_count();
     pthread_exit(NULL);
   }
 
   // release client, transaction complete
+  close(webserv_sockfd);
   close(new_sockfd);
   decrement_thread_count();
   pthread_exit(NULL);
