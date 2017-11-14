@@ -16,8 +16,8 @@
 
 #include "parse.h"
 
-const bool DEBUG_MODE = true;
-const bool INCLUDE_PARSING_ERROR_MSGS = true;
+const bool DEBUG_MODE = false;
+const bool INCLUDE_PARSING_ERROR_MSGS = false;
 
 const std::string DEFAULT_PORT = "80";
 const std::string VALID_METHOD = "GET";
@@ -29,54 +29,56 @@ const std::string VALID_URL_PROTOCOL_PREFIX = "http:";
 /* accepts a client message, assigns a valid web server request to 'data', and
  * returns true if the client message is valid; otherwise, assigns appropriate
  * detailed error message to 'data' and returns false */
-bool get_parsed_data(int req_size, int header_size,
-  char (&req_buf)[SMALL_BUFFERSIZE], char(&header_buf)[BUFFERSIZE],
-  std::string& webserv_host, std::string& webserv_port, std::string& data) {
+bool get_parsed_data(std::string client_msg, std::string& webserv_host,
+  std::string& webserv_port, std::string& data) {
 
   std::string host, path, port;
-  std::string header_str = std::string(header_buf);
+  std::vector<std::string> headers;
   Parse_Error err;
 
-  data = std::string(req_buf);
-
-  if(parse_request_line(data, host, path, port, err)) {
+  // if parse successful, generate web server request and return true
+  if(parse_client_msg(client_msg, host, path, port, headers, err)) {
     webserv_host = host;
     webserv_port = port;
-    printf("data after parse_request_line %s\n", data.c_str());
-    if(header_size > 0 && parse_headers(header_buf, header_size, err)) {
-      generate_webserver_request(data, host, path, port);
-      printf("data!!!! &s\n", data.c_str());
-      return true;
+    if(DEBUG_MODE) {
+      printf("in <parse.cpp> parse_client_msg successful\r\n");
+      printf("\thost: %s\r\n\tpath: %s\r\n\tport: %s\r\n\theaders:\r\n",
+        host.c_str(), path.c_str(), port.c_str());
+      for(int i = 0; i < headers.size(); ++i) {
+        printf("\t%s%s%s\r\n", i == 0 ? "[" : " ", headers.at(i).c_str(),
+          i == (headers.size()-1) ? "]" : " ");
+      }
     }
-    else {
-      generate_webserver_request(data, host, path, port);
-      return true;
-    }    
+    generate_webserver_request(data, host, path, port, headers);
+    return true;
   }
 
   // otherwise, if parse unsuccessful, return false
-  if(DEBUG_MODE) { printf("in <parse.cpp> parse_client_msg detected error\n"); }
+  if(DEBUG_MODE) { printf("in <parse.cpp> parse_client_msg detected error\r\n"); }
   if(INCLUDE_PARSING_ERROR_MSGS) { get_parse_error_msg(data, err); }
   return false;
-
 }
 
 /* **************************** HELPER FUNCTIONS **************************** */
 
 /* generates a formated HTTP request for the web server requested */
 void generate_webserver_request(std::string& data, std::string& host,
-  std::string& path, std::string& port) {
+  std::string& path, std::string& port, std::vector<std::string>& headers) {
   std::string method = VALID_METHOD, http_vers = VALID_HTTP_VERS;
   std::string webserv_req;
   if(is_match_caseins(DEFAULT_PORT, port)) {
-    webserv_req= method + " /" + path + " " + http_vers + "\nHost: " + host +
-      "\nConnection: close\n";
+    webserv_req= method + " /" + path + " " + http_vers + "\r\nHost: " + host +
+      "\r\nConnection: close\r\n";
   }
   else {  // include port # in Host: header if not default port '80'
-    webserv_req= method + " /" + path + " " + http_vers + "\nHost: " + host +
-      ":" + port + "\nConnection: close\n";
+    webserv_req= method + " /" + path + " " + http_vers + "\r\nHost: " + host +
+      ":" + port + "\r\nConnection: close\r\n";
   }
-  webserv_req += "\n";
+  for(std::vector<std::string>::iterator it = headers.begin();
+    it != headers.end(); ++it) {
+      webserv_req += *it + "\r\n";
+  }
+  webserv_req += "\r\n";
   data = webserv_req;
 }
 
@@ -85,94 +87,103 @@ void get_parse_error_msg(std::string& data, Parse_Error& err) {
   switch(err) {
     case e_req_line:
       data += "Invalid request line: expecting <METHOD> <URL> <HTTP VERSION>"
-              "\ni.e. 'GET http://hostname[:port]/path HTTP/1.0'\n";
+              "\r\ni.e. 'GET http://hostname[:port]/path HTTP/1.0'\r\n";
       break;
     case e_method:
-      data += "Invalid HTTP method: only GET accepted\n";
+      data += "Invalid HTTP method: only GET accepted\r\n";
       break;
     case e_url:
       data += "Invalid URL: must use absolute URI formatted as "
-              "http://hostname[:port]/path\n";
+              "http://hostname[:port]/path\r\n";
       break;
     case e_http_vers:
-      data += "Invalid HTTP version: only HTTP/1.0 accepted\n";
+      data += "Invalid HTTP version: only HTTP/1.0 accepted\r\n";
       break;
     case e_http_prefix:
-      data += "Invalid protocol prefix in URL: only 'http://' accepted\n";
+      data += "Invalid protocol prefix in URL: only 'http://' accepted\r\n";
       break;
     case e_host:
-      data += "Missing host\n";
+      data += "Missing host\r\n";
       break;
     case e_dns:
-      data += "Failed to resolve the hostname with DNS\n";
+      data += "Failed to resolve the hostname with DNS\r\n";
       break;
     case e_path:
-      data += "Missing path: absolute URI required\n"
-              "i.e. http://hostname[:port]/path\n";
+      data += "Missing path: absolute URI required\r\n"
+              "i.e. http://hostname[:port]/path\r\n";
       break;
     case e_port:
-      data += "Invalid port number, must be numeric\n";
+      data += "Invalid port number, must be numeric\r\n";
       break;
     case e_headers:
-      data += "Invalid formatting of header(s). Expected <NAME>: <VALUE>\n";
+      data += "Invalid formatting of header(s). Expected <NAME>: <VALUE>\r\n";
       break;
-    case e_name_ws:
-      data += "Header name may not contain embedded whitespace,\n"
-              "i.e. 'Content-type' ok, 'Content type' results in error\n";
-      break;
-    case e_header_val:
-      data += "Header missing value. Expected <NAME>: <VALUE>\n";
+    case e_header_incomplete:
+      data += "Header incomplete. Expected <NAME>: <VALUE>\r\n";
       break;
   }
 }
 
 // PARSING FUNCTIONS
 
+/* extracts web server host, path, and port number and headers (if present) from
+ * the client message and returns true if successful; otherwise returns false */
+bool parse_client_msg(std::string msg, std::string& host, std::string& path,
+  std::string& port, std::vector<std::string>& headers, Parse_Error& err) {
+
+  // get first line of client request
+  std::string delimiter = "\r\n";   // standard cr lf
+  std::string alt_delimiter = "\n"; // handle (non-standard) lf
+  std::size_t pos = msg.find(delimiter);
+  if(pos == std::string::npos) {
+    delimiter = alt_delimiter;
+    pos = msg.find(delimiter);
+  }
+  std::string req = msg.substr(0, pos);
+  msg.erase(0, pos + delimiter.size());
+
+  if(parse_request_line(req, host, path, port, err)) {
+    // request line parse successful, extract headers if present
+    if(msg.size() > 0) {
+      return(parse_headers(msg, headers, err));
+    }
+    return true;  // client request line valid
+  }
+  return false;   // client request line invalid
+}
+
 /* parses client request line into host, path, and port number and returns true;
  * otherwise, returns false for invalid formatting and/or bad DNS */
-bool parse_request_line(std::string& req, std::string& host, std::string& path,
+bool parse_request_line(std::string req, std::string& host, std::string& path,
     std::string &port, Parse_Error& err) {
 
   // client request line should contain 3 parts: <METHOD> <URL> <HTTP VERSION>
   std::string method, url, http_vers;
 
-  printf("REQUEST IN parse_request_line %s\n", req.c_str());
-
-  if(!extract_request_elements(req, method, url, http_vers, err)) {
-    return false; printf("EXTRACT ELEMENTS FAILED___________\n");
+  if(extract_request_elements(req, method, url, http_vers, err)) {
+    if(!verify_method(method)) {
+      err = e_method;
+      return false;
+    }
+    if(!verify_http_vers(http_vers)) {
+      err = e_http_vers;
+      return false;
+    }
+    if(!parse_url(url, host, path, port, err)) {
+      return false;
+    }
+    return true;
   }
-  printf("extract_request_elements returned true\n");
-  if(!verify_method(method)) {
-    err = e_method;
-    return false;
-  }
-  printf("VERIFY METHOD OK\n" );
-  if(!verify_http_vers(http_vers)) {
-    err = e_http_vers;
-    return false;
-  }
-  printf("VERIFY HTTP VERSION OK\n" );
-  if(!parse_url(url, host, path, port, err)) {
-    return false;
-  }
-  printf("VERIFY URL OK\n");
-  return true;
+  return false;
 }
 
 /* parses headers into a vector of strings (each element as <name: value>) and
  * returns true; otherwise returns false for invalid formatting
  * Note: if no headers are found, returns true with headers.empty() == true */
-bool parse_headers(char(&header_buf)[BUFFERSIZE], int header_size,
-  Parse_Error& err)
-{
-  std::string headers_str;
-  std::vector<std::string> headers;
-  std::vector<int> size_so_far;
-  if(!extract_headers(headers_str, headers, size_so_far)) {
-    return false;
-  }
-  if(!verify_headers(headers, err, size_so_far, header_buf, header_size)) {
-    return false;
+bool parse_headers(std::string msg, std::vector<std::string> &headers,
+    Parse_Error& err) {
+  if(extract_headers(msg, headers)) {
+    return verify_headers(headers, err);
   }
   return true;     // no headers present
 }
@@ -209,35 +220,30 @@ bool parse_url(std::string url, std::string& host, std::string& path,
 
 /* extracts each header line from 'msg' into an element in 'headers' and returns
  * true if headers are present; otherwise returns false */
-bool extract_headers(std::string h_str, std::vector<std::string> &headers,
-  std::vector<int> size_so_far) {
-
+bool extract_headers(std::string msg, std::vector<std::string> &headers) {
   std::string eol_delim_used;
   std::string eol_delim = "\r\n";   // standard is cr lf
   std::string alt_eol_delim = "\n"; // handle (non-standard) lf
   std::size_t pos = 0;
-  int curr_size = 0;
 
-  if(h_str.empty()) { return false; }
+  if(msg.empty()) { return false; }
 
   bool all_headers_extracted = false;
-  while(!all_headers_extracted && !h_str.empty()) {
-    pos = h_str.find(eol_delim);
+  while(!all_headers_extracted && !msg.empty()) {
+    pos = msg.find(eol_delim);
     eol_delim_used = eol_delim;
     if(pos == std::string::npos) {
-      pos = h_str.find(alt_eol_delim);
+      pos = msg.find(alt_eol_delim);
       eol_delim_used = alt_eol_delim;
     }
     if(pos != std::string::npos) {
       if(pos > 0) {
-        curr_size += (pos + eol_delim_used.length());
-        size_so_far.push_back(curr_size);
-        headers.push_back(h_str.substr(0, pos + eol_delim_used.length()));
+        headers.push_back(msg.substr(0, pos));
       }
       else {
         all_headers_extracted = true;
       }
-      h_str.erase(0, pos + eol_delim_used.size());
+      msg.erase(0, pos + eol_delim_used.size());
     }
     else {
       all_headers_extracted = true;
@@ -252,21 +258,14 @@ bool extract_headers(std::string h_str, std::vector<std::string> &headers,
 bool extract_request_elements(std::string req, std::string& method,
     std::string& url, std::string& http_vers, Parse_Error& err) {
   trim(req);
-  printf("REQUEST IN extract_request_elements %s\n", req.c_str());
   // extract each space-delimited element into a vector entry
   std::istringstream iss(req);
   std::istream_iterator<std::string> beg(iss), end;
   std::vector<std::string> elements(beg, end);
 
-  printf("ELEMENTS IN elements\n");
-  for(int i = 0; i < elements.size(); i++) {
-    printf("%s\n", (elements.at(i)).c_str());
-  }
-
   // check that there are exactly three elements
   int num_elements = elements.size();
   if(num_elements != 3) {
-    printf("NUM ELEMENTS %d", num_elements);
     err = e_req_line;
     return false;
   }
@@ -355,19 +354,16 @@ bool verify_http_vers(std::string& http_vers) {
   return is_match_caseins(VALID_HTTP_VERS, http_vers);
 }
 
-/* returns true if each header has valid format [name: value]; otherwise returns
- * false -- note: removes any duplicate 'Host' or 'Connection' headers */
-bool verify_headers(std::vector<std::string> &headers, Parse_Error& err,
-  std::vector<int> &size_so_far, char(&header_buf)[BUFFERSIZE], int header_size)
-{
+/* returns true if each header has valid format [name: value] and removes any
+ * duplicate 'Host' or 'Connection' headers; otherwise returns false */
+bool verify_headers(std::vector<std::string> &headers, Parse_Error& err) {
   std::size_t pos = 0;
   std::string name_delim = ":";
-  std::string def_host = "Host", def_conn = "Connection";
+  std::string def_host = "Host", def_conn = "Connection",
+    def_proxy_conn = "Proxy-Connection";
   std::vector<int> dup_headers_found;
 
   std::string orig_header, name, value;
-
-  printf("SIZES MATCH? %d %d\n", headers.size(), size_so_far.size());
 
   int num_elem = headers.size();
   for(int i = 0; i < num_elem; ++i) {
@@ -379,34 +375,30 @@ bool verify_headers(std::vector<std::string> &headers, Parse_Error& err,
       return false;
     }
 
+    if(pos == 0 || pos >= orig_header.length()) {
+      err = e_header_incomplete;
+      return false;
+    }
+
     name = orig_header.substr(0, pos);
-    trim(name);
+    value = orig_header.substr(pos);  // includes ":"
+
+    headers.at(i) = name + value;
 
     // track indices of headers with names: 'Host' and/or 'Connection'
-    if(is_match_caseins(def_host, name) || is_match_caseins(def_conn, name)) {
+    if(is_match_caseins(def_host, name) || is_match_caseins(def_conn, name)
+        || is_match_caseins(def_proxy_conn, name)) {
       dup_headers_found.push_back(i);
     }
   }
 
   // remove duplicate 'Host' (extracted from url) and 'Connection' (defaults to
   // close) headers -> these are automatically added to the web server request
-  if(dup_headers_found.size() > 0) {
-    char first_half[SMALL_BUFFERSIZE];
-    char last_half[SMALL_BUFFERSIZE/2];
-    size_t start, end, size;
-    size_t total_size;
-    for(int i = dup_headers_found.size()-1; i >=0; --i) {
-      end = size_so_far.at(i);
-      start = end - (headers.at(i)).length();
-      size = end - start;
-      strncpy(first_half, header_buf, start);  // copy all before
-      strncpy(last_half, (header_buf + end), (total_size - end));
-      strcat(first_half, last_half);
-      memset(header_buf, 0, total_size);
-      total_size -= size;
-      strncpy(header_buf, first_half, total_size);
-    }
+  for(std::vector<int>::reverse_iterator rit = dup_headers_found.rbegin();
+      rit != dup_headers_found.rend(); ++rit) {
+    headers.erase(headers.begin() + *rit);
   }
+
   return true;
 }
 
